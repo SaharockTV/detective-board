@@ -95,7 +95,7 @@ export function useBoard(code, me) {
   const upload = useCallback((file) => backend.current.upload(boardRef.current.id, file), [])
 
   const derived = useMemo(() => {
-    const items = [], threads = [], messages = [], members = [], history = {}
+    const items = [], threads = [], messages = [], members = [], strokes = [], history = {}
     let meta = null
     for (const r of rows.current.values()) {
       const d = r.data
@@ -104,6 +104,7 @@ export function useBoard(code, me) {
       else if (r.kind === 'thread') threads.push(d)
       else if (r.kind === 'message') messages.push({ ...d, _ts: r.updated_at })
       else if (r.kind === 'member') members.push(d)
+      else if (r.kind === 'stroke') strokes.push(d)
       else if (r.kind === 'history') (history[d.item] ||= []).push({ ...d, _ts: r.updated_at })
       else if (r.kind === 'meta') meta = d
     }
@@ -111,7 +112,8 @@ export function useBoard(code, me) {
     messages.sort((a, b) => a.ts - b.ts)
     members.sort((a, b) => a.joined - b.joined)
     for (const k in history) history[k].sort((a, b) => b.ts - a.ts)
-    return { items, threads, messages, members, history, meta }
+    strokes.sort((a, b) => a.ts - b.ts)
+    return { items, threads, messages, members, strokes, history, meta }
   }, [ver])
 
   const title = derived.meta?.title || board?.title || ''

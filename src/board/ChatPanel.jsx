@@ -1,3 +1,4 @@
+import Icon from '../components/Icon'
 import React, { useEffect, useRef, useState } from 'react'
 import { Thumb, MediaView } from '../components/Media'
 import { uid, fmtTime, initials } from '../lib/util'
@@ -37,7 +38,7 @@ export default function ChatPanel({ me, members, messages, put, upload, items, f
     <div className="chat">
       {mine.length > 0 && (
         <div className="reminders">
-          <div className="rm-h">⏰ Напоминания для вас</div>
+          <div className="rm-h">Напоминания для вас</div>
           {mine.slice(-4).map(m => (
             <div key={m.id} className="rm-i">
               <span><b style={{ color: members[m.author]?.color }}>{members[m.author]?.name}</b>: {m.text}{m.remind.at && <em> · {fmtTime(new Date(m.remind.at).getTime())}</em>}</span>
@@ -53,12 +54,12 @@ export default function ChatPanel({ me, members, messages, put, upload, items, f
           const self = m.author === me.id
           return (
             <div key={m.id} className={'msg' + (self ? ' self' : '') + (m.remind ? ' remind' : '')} style={{ '--c': a?.color }}>
-              <div className="msg-av">{initials(a?.name)}</div>
+              <div className="msg-av">{m.author === 'ai' ? 'ИИ' : initials(a?.name)}</div>
               <div className="msg-b">
                 <div className="msg-h"><b>{a?.name || '?'}</b><span>{fmtTime(m.ts)}</span></div>
-                {m.remind && <div className={'msg-rem' + (m.remind.done ? ' done' : '')}>⏰ Напоминание {m.remind.to === 'all' ? 'всем' : 'для ' + (members[m.remind.to]?.name || '?')}{m.remind.at && ' · ' + fmtTime(new Date(m.remind.at).getTime())}{m.remind.done && ' · выполнено'}</div>}
+                {m.remind && <div className={'msg-rem' + (m.remind.done ? ' done' : '')}>Напоминание {m.remind.to === 'all' ? 'всем' : 'для ' + (members[m.remind.to]?.name || '?')}{m.remind.at && ' · ' + fmtTime(new Date(m.remind.at).getTime())}{m.remind.done && ' · выполнено'}</div>}
                 {m.text && <div className="msg-t">{m.text}</div>}
-                {m.item && <button className="msg-ref" onClick={() => focus(m.item.id)}>📌 {m.item.title || 'улика'}</button>}
+                {m.item && <button className="msg-ref" onClick={() => focus(m.item.id)}>→ {m.item.title || 'улика'}</button>}
                 {m.files?.length > 0 && <div className="msg-files">{m.files.map(f => <Thumb key={f.id} m={f} onClick={() => setOpen(f)} />)}</div>}
               </div>
             </div>
@@ -67,7 +68,7 @@ export default function ChatPanel({ me, members, messages, put, upload, items, f
       </div>
       {open && <div className="lightbox" onClick={() => setOpen(null)}><div onClick={e => e.stopPropagation()}><MediaView m={open} /></div></div>}
       <form className="composer" onSubmit={send}>
-        {files.length > 0 && <div className="cf">{files.map((f, i) => <span key={i}>📎 {f.name} <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))}>×</button></span>)}</div>}
+        {files.length > 0 && <div className="cf">{files.map((f, i) => <span key={i}>{f.name} <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))}>×</button></span>)}</div>}
         {remind && (
           <div className="rem-opts">
             <select value={to} onChange={e => setTo(e.target.value)}>
@@ -81,9 +82,9 @@ export default function ChatPanel({ me, members, messages, put, upload, items, f
         <textarea value={text} onChange={e => setText(e.target.value)} placeholder="Сообщение напарникам…" rows={2}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
         <div className="cbar">
-          <button type="button" title="Файлы" onClick={() => fileRef.current.click()}>📎</button>
-          <button type="button" className={remind ? 'on' : ''} title="Напоминание" onClick={() => setRemind(r => !r)}>⏰</button>
-          {selected && <button type="button" className={ref ? 'on' : ''} title={'Сослаться на «' + (selected.title || 'улику') + '»'} onClick={() => setRef(r => !r)}>📌</button>}
+          <button type="button" title="Файлы" onClick={() => fileRef.current.click()}><Icon n="clip" size={18} /></button>
+          <button type="button" className={remind ? 'on' : ''} title="Напоминание" onClick={() => setRemind(r => !r)}><Icon n="clock" size={18} /></button>
+          {selected && <button type="button" className={ref ? 'on' : ''} title={'Сослаться на «' + (selected.title || 'улику') + '»'} onClick={() => setRef(r => !r)}><Icon n="link" size={18} /></button>}
           <span className="grow" />
           <button className="btn primary sm" disabled={busy}>{busy ? '…' : 'Отправить'}</button>
         </div>

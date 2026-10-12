@@ -1,9 +1,8 @@
-import React, { useRef, useState } from 'react'
+import React, { useRef } from 'react'
 import { TEMPLATES } from '../assets/catalog'
-import { STARTER_PHOTOS } from '../assets/art'
+import Icon from '../components/Icon'
 
 export default function AssetTray({ onAdd, onFiles, canEdit }) {
-  const [tab, setTab] = useState('paper')
   const file = useRef(null)
   const drag = (data) => (e) => {
     e.dataTransfer.setData('application/x-detective', JSON.stringify(data))
@@ -11,29 +10,15 @@ export default function AssetTray({ onAdd, onFiles, canEdit }) {
   }
   return (
     <div className={'tray' + (canEdit ? '' : ' disabled')}>
-      <div className="tray-tabs">
-        <button className={tab === 'paper' ? 'on' : ''} onClick={() => setTab('paper')}>Бумаги</button>
-        <button className={tab === 'photo' ? 'on' : ''} onClick={() => setTab('photo')}>Фото</button>
+      <div className="tray-h">Бланки и носители</div>
+      <div className="tray-grid">
+        {TEMPLATES.map(t => (
+          <button key={t.type} className="tray-item" draggable={canEdit} onDragStart={drag({ type: t.type })} onClick={() => canEdit && onAdd({ type: t.type })} title={'Добавить: ' + t.name}>
+            <span className={'mini mini-' + t.type}><i /></span><span className="ti-n">{t.name}</span>
+          </button>
+        ))}
       </div>
-      {tab === 'paper' && (
-        <div className="tray-grid">
-          {TEMPLATES.map(t => (
-            <button key={t.type} className={'tray-item ti-' + t.type} draggable={canEdit} onDragStart={drag({ type: t.type })} onClick={() => canEdit && onAdd({ type: t.type })} title={'Добавить: ' + t.name}>
-              <span className="ti-ic">{t.icon}</span><span>{t.name}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      {tab === 'photo' && (
-        <div className="tray-photos">
-          {STARTER_PHOTOS.map(p => (
-            <button key={p.key} className="tray-photo" draggable={canEdit} onDragStart={drag({ type: 'polaroid', photo: { name: p.name, url: p.url } })} onClick={() => canEdit && onAdd({ type: 'polaroid', photo: { name: p.name, url: p.url } })} title={p.name}>
-              <img src={p.url} alt="" draggable={false} /><span>{p.name}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      <button className="upload-btn" disabled={!canEdit} onClick={() => file.current.click()}>⬆ Загрузить свои<br /><small>фото · видео · mp3 · .glb</small></button>
+      <button className="upload-btn" disabled={!canEdit} onClick={() => file.current.click()}><Icon n="upload" size={18} /> Загрузить материалы<small>фото · видео · аудио · PDF · .glb</small></button>
       <input ref={file} type="file" multiple hidden accept="image/*,video/*,audio/*,.mp3,.wav,.ogg,.m4a,.glb,.gltf,.pdf,.txt,.doc,.docx" onChange={e => { onFiles([...e.target.files]); e.target.value = '' }} />
     </div>
   )

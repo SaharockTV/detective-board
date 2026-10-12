@@ -21,13 +21,14 @@ export function ChalkDefs() {
   )
 }
 
+// Шапка дела: лист бумаги с машинописным заголовком (раньше — меловая доска)
 export function ChalkBoard({ title, subtitle, onEdit, className = '', children }) {
   return (
-    <div className={'chalkboard ' + className} onDoubleClick={onEdit}>
-      <div className="chalk-dust" />
-      <div className="chalk-text">{title || 'Без названия'}</div>
-      {subtitle && <div className="chalk-sub">{subtitle}</div>}
-      <div className="chalk-ledge"><span /><span /></div>
+    <div className={'case-sheet ' + className} onDoubleClick={onEdit}>
+      <i className="cs-pin l" /><i className="cs-pin r" />
+      <div className="cs-top"><span>МАТЕРИАЛЫ ДЕЛА</span><span>{subtitle}</span></div>
+      <div className="cs-title">{title || 'Без названия'}</div>
+      <div className="cs-foot"><span>Для служебного пользования</span><span>Экз. № 1</span></div>
       {children}
     </div>
   )

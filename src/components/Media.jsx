@@ -59,12 +59,12 @@ export function MediaView({ m }) {
     </div>
   )
   if (m.kind === 'model') return <div className="mv-model"><Model m={m} /></div>
-  return <a className="mv-file" href={u} download={m.name} target="_blank" rel="noreferrer">📎 {m.name}</a>
+  return <a className="mv-file" href={u} download={m.name} target="_blank" rel="noreferrer">{m.name}</a>
 }
 
 export function Thumb({ m, onClick }) {
   if (m.kind === 'image') return <Img m={m} className="thumb" onClick={onClick} />
-  const ic = { video: '🎞️', audio: '📼', model: '🧊', file: '📎' }[m.kind] || '📎'
+  const ic = { video: 'VID', audio: 'AUD', model: '3D', file: 'DOC' }[m.kind] || 'DOC'
   return <div className="thumb ic" onClick={onClick} title={m.name}>{ic}</div>
 }
 

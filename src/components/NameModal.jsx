@@ -1,18 +1,23 @@
 import React, { useState } from 'react'
 import { PALETTE } from '../lib/util'
 
-export default function NameModal({ me, onSave, title = 'Кто вы, детектив?' }) {
+export default function NameModal({ me, onSave, title = 'Кто вы, детектив?', role }) {
+  const [rl, setRl] = useState(role || '')
   const [name, setName] = useState(me.name || '')
   const [color, setColor] = useState(me.color)
   const ok = name.trim().length > 0
   return (
     <div className="modal-back">
-      <form className="modal paper-modal" onSubmit={(e) => { e.preventDefault(); ok && onSave({ ...me, name: name.trim(), color }) }}>
+      <form className="modal paper-modal" onSubmit={(e) => { e.preventDefault(); ok && onSave({ ...me, name: name.trim(), color, ...(role !== undefined ? { role: rl.trim() } : {}) }) }}>
         <div className="stamp">ДОПУСК</div>
         <h2>{title}</h2>
         <label>Позывной
           <input autoFocus value={name} maxLength={24} onChange={e => setName(e.target.value)} placeholder="Например, Шерлок" />
         </label>
+        {role !== undefined && <label>Роль в деле
+          <input value={rl} maxLength={32} onChange={e => setRl(e.target.value)} placeholder="Например, криминалист" list="roles" />
+          <datalist id="roles"><option value="Ведущий детектив" /><option value="Криминалист" /><option value="Аналитик" /><option value="Оперативник" /><option value="Психолог-профайлер" /><option value="Хакер" /></datalist>
+        </label>}
         <label>Цвет ваших заметок</label>
         <div className="swatches">
           {PALETTE.map(c => <button type="button" key={c} className={'sw' + (c === color ? ' on' : '')} style={{ background: c }} onClick={() => setColor(c)} />)}

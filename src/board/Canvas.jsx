@@ -1,7 +1,37 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import Card from './Card'
 import { ChalkBoard } from '../components/Chalk'
-import { pinWorld, worldToLocal, clamp, THREADS, throttle } from '../lib/util'
+import Ghost, { DESTROY } from './Destroy'
+import { pinWorld, worldToLocal, clamp, THREADS, throttle, uid } from '../lib/util'
+
+export const PENS = {
+  red: { name: 'Красный маркер', color: '#c1121f', width: 5 },
+  black: { name: 'Чёрный маркер', color: '#1b1b1b', width: 4 },
+  blue: { name: 'Синяя ручка', color: '#1d4ed8', width: 3 },
+  hl: { name: 'Жёлтый выделитель', color: '#ffe600', width: 22, alpha: .45 },
+  chalk: { name: 'Мел', color: '#f4f1e8', width: 6 },
+}
+export const STAMPS = {
+  secret: { text: 'СЕКРЕТНО', color: '#b91c1c' },
+  ok: { text: 'ПОДТВЕРЖДЕНО', color: '#15803d' },
+  lie: { text: 'ЛОЖЬ', color: '#b91c1c' },
+  checked: { text: 'ПРОВЕРЕНО', color: '#1d4ed8' },
+  alibi: { text: 'АЛИБИ', color: '#7c3aed' },
+  closed: { text: 'ЗАКРЫТО', color: '#334155' },
+}
+const SEL_TOOLS = new Set(['select', 'loupe', 'torch', 'uv'])
+
+function strokePath(pts) {
+  if (!pts?.length) return ''
+  if (pts.length < 3) return `M${pts[0][0]},${pts[0][1]} L${pts[pts.length - 1][0] + .1},${pts[pts.length - 1][1]}`
+  let d = `M${pts[0][0]},${pts[0][1]}`
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mx = (pts[i][0] + pts[i + 1][0]) / 2, my = (pts[i][1] + pts[i + 1][1]) / 2
+    d += ` Q${pts[i][0]},${pts[i][1]} ${mx.toFixed(1)},${my.toFixed(1)}`
+  }
+  const l = pts[pts.length - 1]
+  return d + ` L${l[0]},${l[1]}`
+}
 
 const SIGN = { x: -380, y: -640, w: 760, h: 200 }
 
@@ -14,7 +44,7 @@ function threadPath(a, b) {
 }
 
 export default function Canvas(p) {
-  const { items, threads, members, me, tool, threadKind, canEdit, view, setView, selected, onSelect, actions, bus, send, isDim, title, signSub, onRenameTitle, layer, appends, spaceDown } = p
+  const { items, threads, strokes = [], pen = 'red', stampKind = 'secret', members, me, tool, threadKind, canEdit, view, setView, selected, onSelect, actions, bus, send, isDim, title, signSub, onRenameTitle, layer, appends, spaceDown } = p
   const root = useRef(null)
   const g = useRef(null) // текущий жест
   const [local, setLocal] = useState({}) // мои перетаскивания
@@ -24,14 +54,28 @@ export default function Canvas(p) {
   const [threadPop, setThreadPop] = useState(null)
   const viewRef = useRef(view); viewRef.current = view
   const lastSign = useRef(0)
+  const [ghosts, setGhosts] = useState({})
+  const [lifted, setLifted] = useState(null)
+  const [drawing, setDrawing] = useState(null)
+  const liveStrokes = useRef({})
+  const [ptr, setPtr] = useState(null)
+  const sel = SEL_TOOLS.has(tool)
+  const optics = tool === 'loupe' || tool === 'torch' || tool === 'uv'
 
   // удалённые перетаскивания
   useEffect(() => bus.on((e) => {
     if (e.t === 'drag') { remote.current[e.id] = e; force(v => v + 1) }
     else if (e.t === 'rowapplied' && remote.current[e.row.id]) { delete remote.current[e.row.id]; force(v => v + 1) }
+    else if (e.t === 'rowapplied' && liveStrokes.current[e.row.id]) { delete liveStrokes.current[e.row.id]; force(v => v + 1) }
+    else if (e.t === 'sl') { liveStrokes.current[e.id] = e; force(v => v + 1) }
+    else if (e.t === 'destroy' && e.it) {
+      const key = e.id + ':' + Date.now()
+      setGhosts(g => ({ ...g, [e.id]: { ...e, key } }))
+      setTimeout(() => setGhosts(g => { if (g[e.id]?.key !== key) return g; const n = { ...g }; delete n[e.id]; return n }), (DESTROY[e.mode]?.ms || 2500) + 200)
+    }
   }), [bus])
 
-  const shown = useMemo(() => items.map(it => ({ ...it, ...(remote.current[it.id] ? pick(remote.current[it.id]) : null), ...(local[it.id] || null) })), [items, local, rv])
+  const shown = useMemo(() => items.filter(it => !ghosts[it.id]).map(it => ({ ...it, ...(remote.current[it.id] ? pick(remote.current[it.id]) : null), ...(local[it.id] || null) })), [items, local, rv, ghosts])
   const byId = useMemo(() => Object.fromEntries(shown.map(i => [i.id, i])), [shown])
 
   const toWorld = (e) => {
@@ -41,6 +85,7 @@ export default function Canvas(p) {
 
   const sendDrag = useMemo(() => throttle((d) => send({ t: 'drag', ...d }), 45), [send])
   const sendCursor = useMemo(() => throttle((c) => send({ t: 'cursor', ...c }), 50), [send])
+  const sendLive = useMemo(() => throttle((d) => send({ t: 'sl', ...d }), 90), [send])
 
   // колесо: масштаб вокруг курсора; тачпад-скролл — панорама
   useEffect(() => {
@@ -61,6 +106,13 @@ export default function Canvas(p) {
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
+
+  function eraseAt(e) {
+    const el = document.elementFromPoint(e.clientX, e.clientY)
+    const st = el?.closest?.('[data-stroke]'), mk = el?.closest?.('[data-mark]')
+    if (st) actions.deleteStroke(st.dataset.stroke)
+    else if (mk) { const [iid, mid] = mk.dataset.mark.split('|'); actions.removeMark(iid, mid) }
+  }
 
   const pts = useRef(new Map()) // активные касания для щипка
   function onDown(e) {
@@ -85,6 +137,23 @@ export default function Canvas(p) {
 
     if (e.button === 1 || tool === 'hand' || spaceDown) { g.current = { type: 'pan', sx: e.clientX, sy: e.clientY, v: viewRef.current }; return }
 
+    if (tool === 'draw' && canEdit) {
+      const P = PENS[pen] || PENS.red
+      g.current = { type: 'draw', id: uid(), pen, color: P.color, width: P.width, alpha: P.alpha || 1, pts: [[Math.round(w.x), Math.round(w.y)]] }
+      setDrawing({ ...g.current })
+      return
+    }
+    if (tool === 'erase' && canEdit) { g.current = { type: 'erase' }; eraseAt(e); return }
+    if ((tool === 'stamp' || tool === 'tape') && canEdit) {
+      if (itemEl) {
+        const id = itemEl.dataset.item, L = worldToLocal(byId[id], w)
+        actions.addMark(id, { t: tool, k: tool === 'stamp' ? stampKind : 'tape', x: +clamp(L.x, 0, 1).toFixed(3), y: +clamp(L.y, 0, 1).toFixed(3), rot: Math.round(Math.random() * 30 - 15) })
+      }
+      g.current = null
+      return
+    }
+    if (tool === 'tent' && canEdit) { actions.addTent(w); return }
+
     if (tool === 'thread' && canEdit) {
       const id = pinEl?.dataset.pin || itemEl?.dataset.item
       if (id && byId[id]) {
@@ -101,7 +170,7 @@ export default function Canvas(p) {
       if (pending) { setPending(null); return }
     }
 
-    if (pending && tool === 'select') {
+    if (pending && sel) {
       const id = pinEl?.dataset.pin || itemEl?.dataset.item
       if (id && byId[id] && id !== pending.from) {
         if (!byId[id].pin) actions.setPin(id, worldToLocal(byId[id], w))
@@ -123,7 +192,7 @@ export default function Canvas(p) {
       return
     }
 
-    if (pinEl && tool === 'select' && canEdit) {
+    if (pinEl && sel && canEdit) {
       // клик по ушку иглы в режиме выбора — тоже начинает нить
       setPending({ from: pinEl.dataset.pin, to: w })
       return
@@ -146,6 +215,7 @@ export default function Canvas(p) {
     const w = toWorld(e)
     sendCursor({ id: me.id, name: me.name, color: me.color, layer, x: w.x, y: w.y })
     if (pending) setPending(pp => pp && { ...pp, to: w })
+    if (optics) { const r = root.current.getBoundingClientRect(); setPtr({ x: e.clientX - r.left, y: e.clientY - r.top, wx: w.x, wy: w.y }) }
     if (pts.current.has(e.pointerId)) pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     const s = g.current
     if (!s) return
@@ -160,6 +230,15 @@ export default function Canvas(p) {
       setView({ z, x: c.x - r.left - wx * z, y: c.y - r.top - wy * z })
       return
     }
+    if (s.type === 'draw') {
+      const l = s.pts[s.pts.length - 1]
+      if (Math.hypot(w.x - l[0], w.y - l[1]) < 2.5 / viewRef.current.z) return
+      s.pts.push([Math.round(w.x), Math.round(w.y)])
+      setDrawing({ ...s, pts: s.pts.slice() })
+      sendLive({ id: s.id, layer, color: s.color, width: s.width, alpha: s.alpha, pts: s.pts })
+      return
+    }
+    if (s.type === 'erase') { eraseAt(e); return }
     if (s.type === 'pan') {
       const dx = e.clientX - s.sx, dy = e.clientY - s.sy
       if (Math.abs(dx) + Math.abs(dy) > 3) s.click = false
@@ -170,7 +249,7 @@ export default function Canvas(p) {
     let patch
     if (s.type === 'move') {
       if (Math.abs(dx) + Math.abs(dy) > 3 / viewRef.current.z) {
-        if (!s.moved && s.canMove) actions.raise(s.id)
+        if (!s.moved && s.canMove) { actions.raise(s.id); setLifted(s.id) }
         s.moved = true
       }
       if (!s.canMove || !s.moved) return
@@ -195,6 +274,13 @@ export default function Canvas(p) {
     if (s?.type === 'pinch') { if (pts.current.size === 0) g.current = null; return }
     g.current = null
     if (!s) return
+    setLifted(null)
+    if (s.type === 'draw') {
+      setDrawing(null)
+      if (s.pts.length > 1) actions.addStroke({ id: s.id, pen: s.pen, color: s.color, width: s.width, alpha: s.alpha, pts: s.pts })
+      return
+    }
+    if (s.type === 'erase') return
     if (s.type === 'pan') {
       if (s.click) {
         if (s.sign) { if (Date.now() - lastSign.current < 450) onRenameTitle?.(); lastSign.current = Date.now() }
@@ -223,36 +309,30 @@ export default function Canvas(p) {
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
   }, [])
-  useEffect(() => { if (tool !== 'thread' && tool !== 'select') setPending(null) }, [tool])
+  useEffect(() => { if (tool !== 'thread' && !SEL_TOOLS.has(tool)) setPending(null); if (!optics) setPtr(null) }, [tool])
 
   const v = view
-  const bgSize = 560 * v.z
-  const pendingFrom = pending && byId[pending.from] && pinWorld(byId[pending.from])
-  const tp = threadPop && threads.find(t => t.id === threadPop.id)
-
-  return (
-    <div
-      ref={root}
-      className={`canvas tool-${spaceDown ? 'hand' : tool}${pending ? ' threading' : ''}`}
-      style={{ backgroundPosition: `${v.x}px ${v.y}px`, backgroundSize: `${bgSize}px ${bgSize}px` }}
-      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-      onDragOver={(e) => e.preventDefault()} onDrop={onDrop}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      <div className="world" style={{ transform: `translate(${v.x}px, ${v.y}px) scale(${v.z})` }}>
-        <div className="board-sign" style={{ left: SIGN.x, top: SIGN.y, width: SIGN.w, height: SIGN.h }}>
-          <ChalkBoard title={title} subtitle={signSub} onEdit={onRenameTitle} />
-        </div>
-
+  const scene = (lens) => (
+    <>
         {shown.map(it => (
-          <Card key={it.id} it={it} x={it.x} y={it.y} w={it.w} h={it.h} rot={it.rot || 0}
+          <Card key={it.id} it={it} lifted={!lens && lifted === it.id} x={it.x} y={it.y} w={it.w} h={it.h} rot={it.rot || 0}
             owner={members[it.owner]} selected={selected === it.id} dim={isDim(it)}
             showHandles={selected === it.id && canEdit && tool === 'select'} appends={appends[it.id]} />
         ))}
 
+        <svg className="strokes" width="1" height="1">
+          {strokes.map(st => (
+            <path key={st.id} data-stroke={st.id} className={'stroke p-' + st.pen + (isDim(st) ? ' dim' : '')} d={strokePath(st.pts)} stroke={st.color} strokeWidth={st.width} strokeOpacity={st.alpha || 1} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          ))}
+          {!lens && Object.values(liveStrokes.current).filter(l => l.layer === layer).map(l => (
+            <path key={l.id} d={strokePath(l.pts)} stroke={l.color} strokeWidth={l.width} strokeOpacity={l.alpha || 1} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          ))}
+          {!lens && drawing && <path d={strokePath(drawing.pts)} className={'stroke p-' + drawing.pen} stroke={drawing.color} strokeWidth={drawing.width} strokeOpacity={drawing.alpha} fill="none" strokeLinecap="round" strokeLinejoin="round" />}
+        </svg>
+
         <svg className="threads" width="1" height="1">
           <defs>
-            <filter id="thr-sh" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" /></filter>
+            <filter id="thr-sh" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.8" /></filter>
           </defs>
           {threads.map(t => {
             const A = byId[t.a] && pinWorld(byId[t.a]), B = byId[t.b] && pinWorld(byId[t.b])
@@ -261,9 +341,10 @@ export default function Canvas(p) {
             const col = THREADS[t.kind]?.color || '#c00'
             return (
               <g key={t.id} className={'thread' + (isDim(t) ? ' dim' : '') + (threadPop?.id === t.id ? ' on' : '')} data-thread={t.id}>
-                <path d={d} transform="translate(4 7)" stroke="rgba(0,0,0,.35)" strokeWidth="3" fill="none" filter="url(#thr-sh)" />
-                <path d={d} stroke={col} strokeWidth="3.2" fill="none" strokeLinecap="round" />
-                <path d={d} stroke="rgba(255,255,255,.35)" strokeWidth="1" fill="none" strokeDasharray="2 4" />
+                <path d={d} className="tdraw" pathLength="1" transform="translate(3 6)" stroke="rgba(0,0,0,.32)" strokeWidth="2.6" fill="none" filter="url(#thr-sh)" />
+                <path d={d} className="tdraw" pathLength="1" stroke={col} strokeWidth="2.6" fill="none" strokeLinecap="round" />
+                <path d={d} className="yarn" stroke="rgba(0,0,0,.38)" strokeWidth="2.6" fill="none" strokeDasharray="1.3 2.2" />
+                <path d={d} className="yarn" stroke="rgba(255,255,255,.22)" strokeWidth=".8" fill="none" strokeDasharray="1 2.5" transform="translate(0 -.6)" />
                 <path d={d} className="thread-hit" stroke="transparent" strokeWidth="16" fill="none" />
                 {t.label && (
                   <foreignObject x={mid.x - 90} y={mid.y - 14} width="180" height="30" style={{ overflow: 'visible' }}>
@@ -273,7 +354,7 @@ export default function Canvas(p) {
               </g>
             )
           })}
-          {pendingFrom && (
+          {!lens && pendingFrom && (
             <path d={threadPath(pendingFrom, pending.to).d} stroke={THREADS[threadKind].color} strokeWidth="3" fill="none" strokeDasharray="8 5" className="pending" />
           )}
         </svg>
@@ -282,26 +363,69 @@ export default function Canvas(p) {
           const P = pinWorld(it)
           return (
             <div key={it.id} className={'pin' + (isDim(it) ? ' dim' : '') + (pending?.from === it.id ? ' active' : '')} data-pin={it.id}
-              style={{ left: P.x, top: P.y, '--pc': members[it.owner]?.color || '#d62828' }} title="Ушко иглы — кликните, чтобы тянуть нить">
+              style={{ left: P.x, top: P.y, '--pc': members[it.owner]?.color || '#d62828' }} title="Булавка — кликните, чтобы протянуть нить">
               <svg width="34" height="44" viewBox="0 0 34 44">
-                <ellipse cx="23" cy="39" rx="6" ry="2.4" fill="rgba(0,0,0,.35)" />
-                <path d="M17 18 L23 38" stroke="#9aa3ab" strokeWidth="1.8" strokeLinecap="round" />
-                <circle cx="17" cy="13" r="9" fill="var(--pc)" />
-                <circle cx="17" cy="13" r="9" fill="url(#pinShade)" />
-                <ellipse cx="14" cy="10" rx="3" ry="2.2" fill="rgba(255,255,255,.7)" />
-                <circle cx="17" cy="13" r="2.4" fill="none" stroke="rgba(0,0,0,.5)" strokeWidth="1.3" />
+                <ellipse cx="24" cy="38" rx="7" ry="2.6" fill="rgba(0,0,0,.32)" filter="url(#pinBlur)" />
+                <path d="M17 20 L21.5 37" stroke="url(#pinSteel)" strokeWidth="1.6" strokeLinecap="round" />
+                <path d="M11 16.5 Q17 21 23 16.5 L22 12 L12 12 Z" fill="var(--pc)" />
+                <path d="M11 16.5 Q17 21 23 16.5 L22 12 L12 12 Z" fill="url(#pinShade)" />
+                <ellipse cx="17" cy="11" rx="8.5" ry="5" fill="var(--pc)" />
+                <ellipse cx="17" cy="11" rx="8.5" ry="5" fill="url(#pinTop)" />
+                <ellipse cx="14" cy="9.5" rx="3.2" ry="1.4" fill="rgba(255,255,255,.55)" />
               </svg>
             </div>
           )
         })}
-        <svg width="0" height="0" style={{ position: 'absolute' }}><defs><radialGradient id="pinShade" cx="35%" cy="30%" r="70%"><stop offset="0" stopColor="#fff" stopOpacity=".25" /><stop offset="1" stopColor="#000" stopOpacity=".45" /></radialGradient></defs></svg>
+        <svg width="0" height="0" style={{ position: 'absolute' }}><defs>
+          <linearGradient id="pinShade" x1="0" x2="1"><stop offset="0" stopColor="#fff" stopOpacity=".25" /><stop offset=".45" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity=".45" /></linearGradient>
+          <radialGradient id="pinTop" cx="38%" cy="35%" r="75%"><stop offset="0" stopColor="#fff" stopOpacity=".35" /><stop offset=".6" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity=".35" /></radialGradient>
+          <linearGradient id="pinSteel" x1="0" x2="1"><stop offset="0" stopColor="#e9edf0" /><stop offset="1" stopColor="#7d858c" /></linearGradient>
+          <filter id="pinBlur"><feGaussianBlur stdDeviation="1.2" /></filter>
+        </defs></svg>
 
+    </>
+  )
+  const bgSize = 560 * v.z
+  const pendingFrom = pending && byId[pending.from] && pinWorld(byId[pending.from])
+  const tp = threadPop && threads.find(t => t.id === threadPop.id)
+
+  return (
+    <div
+      ref={root}
+      className={`canvas tool-${spaceDown ? 'hand' : tool}${pending ? ' threading' : ''}${tool === 'uv' ? ' uv-on' : ''}`}
+      style={{ backgroundPosition: `${v.x}px ${v.y}px`, backgroundSize: `${bgSize}px ${bgSize}px` }}
+      onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onPointerLeave={() => optics && setPtr(null)}
+      onDragOver={(e) => e.preventDefault()} onDrop={onDrop}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div className="world" style={{ transform: `translate(${v.x}px, ${v.y}px) scale(${v.z})` }}>
+        <div className="board-sign" style={{ left: SIGN.x, top: SIGN.y, width: SIGN.w, height: SIGN.h }}>
+          <ChalkBoard title={title} subtitle={signSub} onEdit={onRenameTitle} />
+        </div>
+
+        {ghosts && Object.values(ghosts).filter(g => (g.it.layer || 'main') === layer).map(g => <Ghost key={g.key} g={g} owner={members[g.it.owner]} />)}
+        {scene(false)}
         <Cursors bus={bus} layer={layer} me={me} z={v.z} />
       </div>
 
-      {pending && <div className="hint-bar">Нить «{THREADS[threadKind].name}»: кликните по следующей игле или карточке · Shift — цепочка · Esc — отмена</div>}
-      {!pending && tool === 'pin' && <div className="hint-bar">Игла: кликните по карточке в месте, где её приколоть</div>}
-      {!pending && tool === 'thread' && <div className="hint-bar">Нить: кликните по ушку иглы, затем по следующей</div>}
+      {tool === 'loupe' && ptr && (() => {
+        const Z = v.z * 2.4, R = 130
+        return (
+          <div className="loupe" style={{ left: ptr.x - R, top: ptr.y - R, width: R * 2, height: R * 2 }}>
+            <div className="loupe-bg" style={{ backgroundPosition: `${R - ptr.wx * Z}px ${R - ptr.wy * Z}px`, backgroundSize: `${560 * Z}px ${560 * Z}px` }} />
+            <div className="world" style={{ transform: `translate(${R - ptr.wx * Z}px, ${R - ptr.wy * Z}px) scale(${Z})` }}>{scene(true)}</div>
+            <i className="loupe-glass" />
+          </div>
+        )
+      })()}
+      {(tool === 'torch' || tool === 'uv') && <div className={'darkness ' + tool} style={{ '--px': (ptr ? ptr.x : -999) + 'px', '--py': (ptr ? ptr.y : -999) + 'px' }} />}
+
+      {pending && <div className="hint-bar">Нить «{THREADS[threadKind].name}»: кликните по следующей булавке или материалу · Shift — цепочка · Esc — отмена</div>}
+      {!pending && tool === 'pin' && <div className="hint-bar">Булавка: кликните по материалу в месте, где его приколоть</div>}
+      {!pending && tool === 'thread' && <div className="hint-bar">Нить: кликните по булавке, затем по следующей</div>}
+      {tool === 'erase' && <div className="hint-bar">Ластик: проведите по пометке, штампу или скотчу</div>}
+      {tool === 'tent' && <div className="hint-bar">Метка: кликните по доске, чтобы поставить нумерованную табличку</div>}
+      {tool === 'uv' && <div className="hint-bar uv">УФ-лампа: проявляет скрытые пометки</div>}
 
       {tp && (
         <div className="thread-pop" style={{ left: threadPop.x, top: threadPop.y }} onPointerDown={e => e.stopPropagation()}>
@@ -313,8 +437,8 @@ export default function Canvas(p) {
           <input disabled={!canEdit} placeholder="подпись нити…" defaultValue={tp.label} key={tp.id}
             onKeyDown={e => { if (e.key === 'Enter') { actions.updateThread(tp.id, { label: e.target.value }); setThreadPop(null) } }}
             onBlur={e => e.target.value !== (tp.label || '') && actions.updateThread(tp.id, { label: e.target.value })} />
-          <div className="tp-meta">Протянул(а): <b style={{ color: members[tp.owner]?.color }}>{members[tp.owner]?.name || '?'}</b></div>
-          {canEdit && <button className="tk del" onClick={() => { actions.deleteThread(tp.id); setThreadPop(null) }}>✂ Обрезать нить</button>}
+          <div className="tp-meta">Связь добавил(а): <b style={{ color: members[tp.owner]?.color }}>{members[tp.owner]?.name || '?'}</b></div>
+          {canEdit && <button className="tk del" onClick={() => { actions.deleteThread(tp.id); setThreadPop(null) }}>Снять нить</button>}
         </div>
       )}
     </div>

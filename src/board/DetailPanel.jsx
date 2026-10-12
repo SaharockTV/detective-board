@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { TPL } from '../assets/catalog'
 import { MediaView, useAutoGrow } from '../components/Media'
+import { DESTROY } from './Destroy'
 import { THREADS, timeAgo, fmtTime, uid, initials } from '../lib/util'
 
-const ACT = { create: 'создал(а) улику', edit: 'изменил(а) текст', append: 'дописал(а)', attach: 'прикрепил(а) файл', detach: 'убрал(а) файл', pin: 'приколол(а) иглой', unpin: 'снял(а) с иглы', thread: 'протянул(а) нить', restore: 'восстановил(а) версию' }
+const ACT = { create: 'создал(а) улику', edit: 'изменил(а) текст', append: 'дописал(а)', attach: 'прикрепил(а) файл', detach: 'убрал(а) файл', pin: 'приколол(а) иглой', unpin: 'снял(а) с иглы', thread: 'протянул(а) нить', restore: 'восстановил(а)', destroy: 'уничтожил(а) улику', stamp: 'поставил(а) штамп' }
 
 export default function DetailPanel({ item, me, members, history, canEdit, threads, items, actions, put, onClose }) {
   const [title, setTitle] = useState(item.title || '')
@@ -12,6 +13,9 @@ export default function DetailPanel({ item, me, members, history, canEdit, threa
   const [add, setAdd] = useState('')
   const [htab, setHtab] = useState('notes')
   const [over, setOver] = useState(false)
+  const [uv, setUv] = useState(item.uv || '')
+  const uvT = useRef(null)
+  const [kill, setKill] = useState(false)
   const fileRef = useRef(null)
   const timer = useRef(null)
   const dirty = useRef(false)
@@ -70,7 +74,7 @@ export default function DetailPanel({ item, me, members, history, canEdit, threa
         <span className="dt-owner" style={{ '--c': owner?.color }}><i>{initials(owner?.name)}</i>{owner?.name || '?'}</span>
         <button className="x" onClick={onClose}>×</button>
       </div>
-      <div className="dt-sub">заведено {fmtTime(item.created || item._ts)} · {item.pin ? '📍 приколото' : 'не приколото'}</div>
+      <div className="dt-sub">заведено {fmtTime(item.created || item._ts)} · {item.pin ? 'приколото' : 'не приколото'}</div>
 
       <div className={'dt-paper p-' + item.type}>
         <input className="dt-title" value={title} disabled={!canEdit} placeholder="Заголовок" onChange={e => { setTitle(e.target.value); schedule() }} />
@@ -105,9 +109,27 @@ export default function DetailPanel({ item, me, members, history, canEdit, threa
         <button className="btn primary sm" onClick={sendAppend} disabled={!add.trim()}>Дописать</button>
       </div>
 
+      <section className="dt-sec uv-sec">
+        <div className="dt-sec-h">Невидимые чернила <span>видно только под УФ-лампой</span></div>
+        <textarea value={uv} disabled={!canEdit} rows={2} placeholder={canEdit ? 'Тайная пометка… проявится под УФ (U)' : ''}
+          onChange={e => { const v = e.target.value; setUv(v); clearTimeout(uvT.current); uvT.current = setTimeout(() => put('item', { uv: v }, item.id), 600) }} />
+      </section>
+
+      {item.marks?.length > 0 && (
+        <section className="dt-sec">
+          <div className="dt-sec-h">Штампы и скотч <span>{item.marks.length}</span></div>
+          <div className="marks-list">
+            {item.marks.map(m => (
+              <span key={m.id} className="mk-chip" style={{ '--c': members[m.by]?.color }}>{m.t === 'tape' ? 'скотч' : ({ secret: 'СЕКРЕТНО', ok: 'ПОДТВЕРЖДЕНО', lie: 'ЛОЖЬ', checked: 'ПРОВЕРЕНО', alibi: 'АЛИБИ', closed: 'ЗАКРЫТО' }[m.k] || m.k)}
+                {canEdit && <button onClick={() => actions.removeMark(item.id, m.id)}>×</button>}</span>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="dt-sec">
         <div className="dt-sec-h">Материалы <span>{media.filter(m => m.id !== 'art').length}</span>
-          {canEdit && <button className="btn sm" onClick={() => fileRef.current.click()}>📎 Прикрепить</button>}
+          {canEdit && <button className="btn sm" onClick={() => fileRef.current.click()}>Прикрепить файл</button>}
         </div>
         <input ref={fileRef} type="file" multiple hidden onChange={e => { actions.attach(item.id, [...e.target.files]); e.target.value = '' }} />
         <div className="dt-media">
@@ -162,7 +184,13 @@ export default function DetailPanel({ item, me, members, history, canEdit, threa
       <div className="dt-actions">
         {canEdit && item.pin && <button className="btn sm" onClick={() => actions.unpin(item.id)}>Снять с иглы</button>}
         {(item.layer && item.layer !== 'main') && item.owner === me.id && <button className="btn sm" onClick={() => actions.copyToMain(item.id)}>⇪ На общую доску</button>}
-        {canEdit && <button className="btn sm danger" onClick={() => confirm('Убрать улику с доски?') && actions.deleteItem(item.id)}>Сжечь улику 🔥</button>}
+        {canEdit && !kill && <button className="btn sm danger" onClick={() => setKill(true)}>Уничтожить…</button>}
+        {canEdit && kill && (
+          <div className="kill-menu">
+            {Object.entries(DESTROY).map(([k, d]) => <button key={k} className="btn sm danger" onClick={() => actions.destroyItem(item.id, k)}>{d.name}</button>)}
+            <button className="btn sm" onClick={() => setKill(false)}>Отмена</button>
+          </div>
+        )}
       </div>
     </div>
   )

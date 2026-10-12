@@ -6,5 +6,6 @@ import './styles/home.css'
 import './styles/board.css'
 import './styles/cards.css'
 import './styles/panels.css'
+import './styles/fx.css'
 
 createRoot(document.getElementById('root')).render(<App />)

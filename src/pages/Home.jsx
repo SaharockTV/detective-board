@@ -4,15 +4,14 @@ import { ChalkBoard, ChalkDefs } from '../components/Chalk'
 import { getBackend, CLOUD } from '../lib/backend'
 import { genCode, uid, normCode, PALETTE } from '../lib/util'
 import { getRecent, removeRecent } from '../lib/identity'
-import { demoRows } from '../assets/demo'
-import { ART } from '../assets/art'
+import { PRESETS, presetRows } from '../assets/presets'
 
-const IDEAS = ['Файлы Кацуры', 'Дело о пропавшем кольце', 'Тайна маяка', 'Операция «Полночь»', 'Кто съел торт?']
+const IDEAS = ['Дело № 1', 'Проверка по заявлению', 'Материалы расследования']
 
 export default function Home({ me, setMe }) {
   const [title, setTitle] = useState('')
   const [name, setName] = useState(me.name || '')
-  const [demo, setDemo] = useState(true)
+  const [preset, setPreset] = useState('empty')
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -38,7 +37,7 @@ export default function Home({ me, setMe }) {
       const rows = [
         { kind: 'meta', data: { id: board.id + '_meta', title: board.title } },
         { kind: 'member', data: { id: board.id + '_' + who.id, user: who.id, name: who.name, color: who.color, joined: now } },
-        ...(demo ? demoRows(who.id) : []),
+        ...presetRows(preset, who.id),
       ].map(r => ({ id: r.data.id, board_id: board.id, kind: r.kind, data: r.data, updated_at: now }))
       await be.putRows(rows)
       setCreated(board)
@@ -64,28 +63,34 @@ export default function Home({ me, setMe }) {
   return (
     <div className="home">
       <ChalkDefs />
-      <div className="home-lamp" />
-      <header className="home-head">
-        <ChalkBoard title={title.trim() || 'Доска расследований'} subtitle={title.trim() ? 'новое дело' : 'создай дело · позови напарников · тяни нити'} className="home-chalk" />
+            <header className="home-head">
+        <ChalkBoard title={title.trim() || 'Доска расследований'} subtitle={new Date().toLocaleDateString('ru-RU')} className="home-chalk" />
       </header>
 
       <main className="home-grid">
         <section className="case-card paper">
           <div className="clip" />
-          <h2>Новое дело</h2>
+          <div className="folder-label">НОВОЕ ДЕЛО</div>
           {!created ? (
             <form onSubmit={create}>
-              <label>Название (напишем мелом)
+              <label>Название дела
                 <input value={title} maxLength={48} onChange={e => setTitle(e.target.value)} placeholder={ph} />
               </label>
-              <label>Ваш позывной
+              <label>Ваше имя
                 <input value={name} maxLength={24} onChange={e => setName(e.target.value)} placeholder="Детектив" />
               </label>
               <div className="row-colors">
                 {PALETTE.slice(0, 8).map(c => <button type="button" key={c} className={'sw small' + (me.color === c ? ' on' : '')} style={{ background: c }} onClick={() => setMe({ ...me, color: c })} />)}
               </div>
-              <label className="check"><input type="checkbox" checked={demo} onChange={e => setDemo(e.target.checked)} /> Начать с примера улик</label>
-              <button className="btn primary big" disabled={busy}>{busy ? 'Открываем…' : 'Открыть дело'}</button>
+              <div className="presets-h">Шаблон</div>
+              <div className="presets">
+                {PRESETS.map(p => (
+                  <button type="button" key={p.id} className={'preset' + (preset === p.id ? ' on' : '')} onClick={() => setPreset(p.id)}>
+                    <b>{p.name}</b><span>{p.desc}</span>
+                  </button>
+                ))}
+              </div>
+              <button className="btn primary big" disabled={busy}>{busy ? 'Заводим дело…' : 'Завести дело'}</button>
             </form>
           ) : (
             <div className="created">
@@ -101,10 +106,10 @@ export default function Home({ me, setMe }) {
         </section>
 
         <section className="case-card paper dark">
-          <h2>Войти по коду</h2>
+          <div className="folder-label">ДОСТУП ПО КОДУ</div>
           <form onSubmit={join}>
             <input className="code-input" value={code} onChange={e => setCode(e.target.value.toUpperCase())} placeholder="XXXX-XXXX" maxLength={9} />
-            <label>Ваш позывной
+            <label>Ваше имя
               <input value={name} maxLength={24} onChange={e => setName(e.target.value)} placeholder="Детектив" />
             </label>
             <button className="btn primary big" disabled={busy}>Войти</button>
@@ -124,12 +129,12 @@ export default function Home({ me, setMe }) {
         </section>
 
         <section className="features">
-          <div className="feat"><img src={ART.print.url} alt="" /><div><b>Бесконечная пробковая доска</b><span>Фото, вырезки, протоколы, видео, аудио и 3D-улики.</span></div></div>
-          <div className="feat"><div className="feat-threads"><i style={{ background: '#d4202a' }} /><i style={{ background: '#f2c12e' }} /><i style={{ background: '#2fa84f' }} /></div><div><b>Иглы и нити</b><span>Красная — точный факт, жёлтая — неточный, зелёная — рассуждение.</span></div></div>
-          <div className="feat"><img src={ART.street.url} alt="" /><div><b>Команда в реальном времени</b><span>Курсоры, чат, напоминания, личные столы и история каждой заметки.</span></div></div>
+          <div className="feat"><b>Пробковая доска без границ</b><span>Фото, документы, протоколы, видео, аудио и 3D — перетащите файлы прямо на доску.</span></div>
+          <div className="feat"><b>Булавки и нити</b><span><i className="lg" style={{ background: '#b3141c' }} />факт · <i className="lg" style={{ background: '#d9a521' }} />не подтверждено · <i className="lg" style={{ background: '#2f7d46' }} />версия</span></div>
+          <div className="feat"><b>Работа группой</b><span>Онлайн-курсоры, чат, напоминания, личные столы, роли и полная история правок.</span></div>
         </section>
       </main>
-      <footer className="home-foot">{CLOUD ? '● Онлайн-режим (Supabase)' : '○ Локальный режим: данные в этом браузере, синхронизация между вкладками. Подключите Supabase для работы командой — см. README.'}</footer>
+      <footer className="home-foot">{CLOUD ? '● Защищённое облачное хранилище · синхронизация в реальном времени' : '○ Локальный режим: данные в этом браузере, синхронизация между вкладками. Подключите Supabase для работы командой — см. README.'}</footer>
     </div>
   )
 }

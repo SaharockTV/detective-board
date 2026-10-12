@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useBoard } from '../lib/useBoard'
 import { navigate } from '../App'
-import Canvas from './Canvas'
+import Canvas, { PENS, STAMPS } from './Canvas'
+import { DESTROY } from './Destroy'
 import AssetTray from './AssetTray'
 import DetailPanel from './DetailPanel'
 import ChatPanel from './ChatPanel'
@@ -11,13 +12,25 @@ import { makeItem, typeForKind, TPL } from '../assets/catalog'
 import { uid, THREADS, initials, clamp } from '../lib/util'
 import { newTabIdentity } from '../lib/identity'
 import { CLOUD } from '../lib/backend'
+import Icon from '../components/Icon'
 
 const TOOLS = [
-  { id: 'select', icon: '↖', name: 'Выбор и перемещение', key: 'V' },
-  { id: 'hand', icon: '✋', name: 'Панорама', key: 'H' },
-  { id: 'pin', icon: '📍', name: 'Игла — приколоть', key: 'P' },
-  { id: 'thread', icon: '🧵', name: 'Нить — связать', key: 'T' },
+  { id: 'select', icon: 'select', name: 'Выбор и перемещение', key: 'V' },
+  { id: 'hand', icon: 'hand', name: 'Панорама', key: 'H' },
+  { id: 'pin', icon: 'pin', name: 'Игла — приколоть', key: 'P' },
+  { id: 'thread', icon: 'thread', name: 'Нить — связать', key: 'T' },
 ]
+const TOOLS2 = [
+  { id: 'draw', icon: 'draw', name: 'Маркер — рисовать от руки', key: 'D' },
+  { id: 'erase', icon: 'erase', name: 'Ластик — стереть рисунок, штамп, скотч', key: 'E' },
+  { id: 'stamp', icon: 'stamp', name: 'Штамп на улику', key: 'S' },
+  { id: 'tape', icon: 'tape', name: 'Скотч — приклеить', key: 'K' },
+  { id: 'tent', icon: 'tent', name: 'Нумерованная метка улики', key: 'N' },
+  { id: 'loupe', icon: 'loupe', name: 'Лупа', key: 'L' },
+  { id: 'torch', icon: 'torch', name: 'Фонарик', key: 'F' },
+  { id: 'uv', icon: 'uv', name: 'УФ-лампа — невидимые чернила', key: 'U' },
+]
+const KEYS = { v: 'select', м: 'select', h: 'hand', р: 'hand', p: 'pin', з: 'pin', t: 'thread', е: 'thread', d: 'draw', в: 'draw', e: 'erase', у: 'erase', s: 'stamp', ы: 'stamp', k: 'tape', л: 'tape', n: 'tent', т: 'tent', l: 'loupe', д: 'loupe', f: 'torch', а: 'torch', u: 'uv', г: 'uv' }
 
 function useMobile() {
   const q = '(max-width: 760px)'
@@ -31,6 +44,8 @@ export default function BoardPage({ code, me, setMe }) {
   const B = useBoard(code, me)
   const [tool, setTool] = useState('select')
   const [threadKind, setThreadKind] = useState('fact')
+  const [pen, setPen] = useState('red')
+  const [stampKind, setStampKind] = useState('secret')
   const [layer, setLayer] = useState('main')
   const [filter, setFilter] = useState([]) // id участников; пусто = все
   const [selected, setSelected] = useState(null)
@@ -65,6 +80,7 @@ export default function BoardPage({ code, me, setMe }) {
   const canEdit = layer === 'main' || layer === me.id
   const items = useMemo(() => B.items.filter(i => (i.layer || 'main') === layer), [B.items, layer])
   const threads = useMemo(() => B.threads.filter(t => (t.layer || 'main') === layer), [B.threads, layer])
+  const strokes = useMemo(() => B.strokes.filter(t => (t.layer || 'main') === layer), [B.strokes, layer])
   const isDim = useCallback((x) => filter.length > 0 && !filter.includes(x.owner), [filter])
   const appends = useMemo(() => {
     const o = {}
@@ -110,6 +126,42 @@ export default function BoardPage({ code, me, setMe }) {
       B.put('item', { deleted: true }, id)
       B.threads.filter(t => t.a === id || t.b === id).forEach(t => B.put('thread', { deleted: true }, t.id))
       setSelected(null)
+    },
+    destroyItem(id, mode = 'burn') {
+      const it = findItem(id)
+      if (!it) return
+      const snap = { ...it }; delete snap._ts
+      const evt = { t: 'destroy', id, mode, it: snap }
+      B.send(evt); B.bus.emit(evt)
+      setSelected(null)
+      setTimeout(() => {
+        B.put('item', { deleted: true, destroyed: mode }, id)
+        B.threads.filter(t => t.a === id || t.b === id).forEach(t => B.put('thread', { deleted: true }, t.id))
+        log(id, 'destroy', { text: DESTROY[mode]?.name, snap: { title: it.title, text: it.text } })
+      }, Math.max(600, (DESTROY[mode]?.ms || 2000) - 500))
+    },
+    restoreItem(id) {
+      B.put('item', { deleted: false, destroyed: null, z: Date.now() }, id)
+      log(id, 'restore', { text: 'улика восстановлена из архива' })
+    },
+    addStroke(st) { B.put('stroke', { ...st, layer, owner: me.id, ts: Date.now() }) },
+    deleteStroke(id) { B.put('stroke', { deleted: true }, id) },
+    addMark(id, m) {
+      const it = findItem(id)
+      if (!it) return
+      B.put('item', { marks: [...(it.marks || []), { ...m, id: uid(), by: me.id, ts: Date.now() }] }, id)
+      if (m.t === 'stamp') log(id, 'stamp', { text: STAMPS[m.k]?.text })
+    },
+    removeMark(id, mid) {
+      const it = findItem(id)
+      if (!it) return
+      B.put('item', { marks: (it.marks || []).filter(x => x.id !== mid) }, id)
+    },
+    addTent(pt) {
+      const num = 1 + Math.max(0, ...B.items.filter(i => i.type === 'tent' && (i.layer || 'main') === layer).map(i => i.num || 0))
+      const it = { id: uid(), type: 'tent', num, x: Math.round(pt.x - 32), y: Math.round(pt.y - 56), w: 64, h: 66, rot: 0, z: Date.now(), title: 'Метка №' + num, text: '', media: [], pin: null, owner: me.id, layer, created: Date.now() }
+      B.put('item', it)
+      log(it.id, 'create', { snap: { title: it.title, text: '' } })
     },
     addItem(type, pt, extra = {}) {
       const it = { id: uid(), ...makeItem(type, { ...pt, owner: me.id, layer, ...extra }) }
@@ -199,14 +251,11 @@ export default function BoardPage({ code, me, setMe }) {
       if (e.target.closest('input,textarea,[contenteditable]')) return
       const k = e.key.toLowerCase()
       if (e.code === 'Space') { setSpaceDown(true); e.preventDefault() }
-      else if (k === 'v' || k === 'м') setTool('select')
-      else if (k === 'h' || k === 'р') setTool('hand')
-      else if (k === 'p' || k === 'з') setTool('pin')
-      else if (k === 't' || k === 'е') setTool('thread')
+      else if (KEYS[k] && !e.ctrlKey && !e.metaKey) setTool(KEYS[k])
       else if (k === '1') { setThreadKind('fact'); setTool('thread') }
       else if (k === '2') { setThreadKind('maybe'); setTool('thread') }
       else if (k === '3') { setThreadKind('reason'); setTool('thread') }
-      else if ((k === 'delete' || k === 'backspace') && selected && canEdit) actions.deleteItem(selected)
+      else if ((k === 'delete' || k === 'backspace') && selected && canEdit) actions.destroyItem(selected, 'crumple')
       else if (k === 'escape') { setSelected(null); setTool('select') }
     }
     const up = (e) => { if (e.code === 'Space') setSpaceDown(false) }
@@ -239,8 +288,8 @@ export default function BoardPage({ code, me, setMe }) {
       seenMsgs.current.add(m.id)
       if (m.author === me.id) continue
       const who = members[m.author]?.name || 'Кто-то'
-      if (m.remind && (m.remind.to === 'all' || m.remind.to === me.id) && !m.remind.at) toast(`⏰ ${who}: ${m.text}`, members[m.author]?.color)
-      else if (!(panelOpen && tab === 'chat')) { setUnread(u => u + 1); toast(`💬 ${who}: ${m.text?.slice(0, 80) || 'файл'}`, members[m.author]?.color) }
+      if (m.remind && (m.remind.to === 'all' || m.remind.to === me.id) && !m.remind.at) toast(`Напоминание · ${who}: ${m.text}`, members[m.author]?.color)
+      else if (!(panelOpen && tab === 'chat')) { setUnread(u => u + 1); toast(`${who}: ${m.text?.slice(0, 80) || 'файл'}`, members[m.author]?.color) }
     }
   }, [B.messages, B.status])
   useEffect(() => { if (panelOpen && tab === 'chat') setUnread(0) }, [panelOpen, tab])
@@ -252,7 +301,7 @@ export default function BoardPage({ code, me, setMe }) {
         if (!r?.at || r.done || fired.includes(m.id)) continue
         if ((r.to === 'all' || r.to === me.id) && new Date(r.at).getTime() <= Date.now()) {
           fired.push(m.id)
-          toast(`⏰ Напоминание от ${members[m.author]?.name || '?'}: ${m.text}`, '#f59e0b')
+          toast(`Напоминание от ${members[m.author]?.name || '?'}: ${m.text}`, '#f59e0b')
           try { new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=').play() } catch { }
         }
       }
@@ -273,6 +322,7 @@ export default function BoardPage({ code, me, setMe }) {
   )
 
   const selItem = B.items.find(i => i.id === selected)
+  const archive = [...B.rows.current.values()].filter(r => r.kind === 'item' && r.data.deleted && r.data.destroyed && (r.data.layer || 'main') === layer).map(r => r.data).slice(-30).reverse()
   const layerOwner = layer === 'main' ? null : members[layer]
   const memberList = Object.values(members)
   const signSub = layer === 'main' ? `дело ${code}` : `личный стол · ${layerOwner?.name || ''}`
@@ -282,14 +332,14 @@ export default function BoardPage({ code, me, setMe }) {
     <div className={'board-page' + (mobile ? ' is-mobile' : '')}>
       <ChalkDefs />
       <header className="topbar">
-        <button className="tb-home" onClick={() => navigate('/')} title="На главную">◂ Дела</button>
+        <button className="tb-home" onClick={() => navigate('/')} title="На главную"><Icon n="back" size={16} /> Дела</button>
         <div className="tb-title" onDoubleClick={() => layer === 'main' && setRenaming(true)} title="Двойной клик — переименовать">{B.title}</div>
-        <button className="tb-code" onClick={() => { navigator.clipboard?.writeText(code); toast('Код скопирован: ' + code) }} title="Скопировать код приглашения">🔑 {code}</button>
-        <button className="tb-btn" onClick={() => { navigator.clipboard?.writeText(location.origin + '/b/' + code); toast('Ссылка скопирована') }}>Пригласить</button>
+        <button className="tb-code" onClick={() => { navigator.clipboard?.writeText(code); toast('Код скопирован: ' + code) }} title="Скопировать код приглашения"><Icon n="key" size={14} /> {code}</button>
+        <button className="tb-btn" onClick={() => { navigator.clipboard?.writeText(location.origin + '/b/' + code); toast('Ссылка скопирована') }}><Icon n="link" size={14} /> Пригласить</button>
 
         <nav className="layers">
-          <button className={layer === 'main' ? 'on' : ''} onClick={() => setLayer('main')}>🗂️ Общая доска</button>
-          <button className={layer === me.id ? 'on' : ''} onClick={() => setLayer(me.id)} style={{ '--c': me.color }}>🗒️ Мой стол</button>
+          <button className={layer === 'main' ? 'on' : ''} onClick={() => setLayer('main')}>Общая доска</button>
+          <button className={layer === me.id ? 'on' : ''} onClick={() => setLayer(me.id)} style={{ '--c': me.color }}>Мой стол</button>
           {memberList.filter(m => m.user !== me.id).map(m => (
             <button key={m.user} className={layer === m.user ? 'on' : ''} onClick={() => setLayer(m.user)} style={{ '--c': m.color }} title={'Личный стол: ' + m.name}>
               <i className="dot" style={{ background: m.color }} />{m.name}
@@ -298,45 +348,63 @@ export default function BoardPage({ code, me, setMe }) {
         </nav>
 
         <select className="layer-select" value={layer} onChange={e => setLayer(e.target.value)}>
-          <option value="main">🗂️ Общая доска</option>
-          <option value={me.id}>🗒️ Мой стол</option>
-          {memberList.filter(m => m.user !== me.id).map(m => <option key={m.user} value={m.user}>👁 Стол: {m.name}</option>)}
+          <option value="main">Общая доска</option>
+          <option value={me.id}>Мой стол</option>
+          {memberList.filter(m => m.user !== me.id).map(m => <option key={m.user} value={m.user}>Стол: {m.name}</option>)}
         </select>
         <div className="people">
           {memberList.map(m => (
             <button key={m.user} className={'avatar' + (online.has(m.user) ? ' online' : '') + (filter.includes(m.user) ? ' on' : '')} style={{ '--c': m.color }}
-              title={`${m.name}${online.has(m.user) ? ' — онлайн' : ''}\nКлик — показать только заметки этого участника`}
+              title={`${m.name}${m.role ? ' · ' + m.role : ''}${online.has(m.user) ? ' — онлайн' : ''}\nКлик — показать только заметки этого участника`}
               onClick={() => setFilter(f => f.includes(m.user) ? f.filter(x => x !== m.user) : [...f, m.user])}>
-              {initials(m.name)}
+              {m.user === 'ai' ? 'ИИ' : initials(m.name)}
+              {m.role && <i className="role-dot" title={m.role}>★</i>}
             </button>
           ))}
           {filter.length > 0 && <button className="tb-btn sm" onClick={() => setFilter([])}>Все заметки</button>}
         </div>
-        <button className="tb-btn" onClick={() => setProfile(true)} title="Сменить имя или цвет">⚙</button>
+        <button className="tb-btn" onClick={() => setProfile(true)} title="Профиль: имя, цвет, роль"><Icon n="settings" size={16} /></button>
       </header>
 
       <div className="board-body">
         <aside className={'left' + (trayOpen ? '' : ' closed')}>
           <div className="tools">
             {TOOLS.map(t => (
-              <button key={t.id} className={'tool' + (tool === t.id ? ' on' : '')} title={`${t.name} (${t.key})`} onClick={() => setTool(t.id)}>{t.icon}</button>
+              <button key={t.id} className={'tool' + (tool === t.id ? ' on' : '')} title={`${t.name} (${t.key})`} onClick={() => setTool(t.id)}><Icon n={t.icon} size={21} /></button>
+            ))}
+            <div className="tools-sep" />
+            {TOOLS2.map(t => (
+              <button key={t.id} className={'tool' + (tool === t.id ? ' on' : '')} title={`${t.name} (${t.key})`} onClick={() => setTool(tool === t.id ? 'select' : t.id)}><Icon n={t.icon} size={21} /></button>
             ))}
             <div className="thread-kinds">
               {Object.entries(THREADS).map(([k, t], i) => (
                 <button key={k} className={'tkind' + (threadKind === k ? ' on' : '')} style={{ '--c': t.color }} title={`${t.name} (${i + 1})`} onClick={() => { setThreadKind(k); setTool('thread') }}><i /></button>
               ))}
             </div>
-            <button className={'tool' + (trayOpen ? ' on' : '')} title="Набор улик" onClick={() => { setTrayOpen(o => !o); mobile && setPanelOpen(false) }}>🧰</button>
-            <button className={'tool mobile-only' + (panelOpen && tab === 'card' ? ' on' : '')} title="Улика" onClick={() => { const o = !(panelOpen && tab === 'card'); setTab('card'); setPanelOpen(o); setTrayOpen(false) }}>📄</button>
-            <button className={'tool mobile-only' + (panelOpen && tab === 'chat' ? ' on' : '')} title="Чат" onClick={() => { const o = !(panelOpen && tab === 'chat'); setTab('chat'); setPanelOpen(o); setTrayOpen(false) }}>💬{unread > 0 && <b className="badge dotb">{unread}</b>}</button>
+            <button className={'tool' + (trayOpen ? ' on' : '')} title="Набор улик" onClick={() => { setTrayOpen(o => !o); mobile && setPanelOpen(false) }}><Icon n="tray" size={21} /></button>
+            <button className={'tool mobile-only' + (panelOpen && tab === 'card' ? ' on' : '')} title="Улика" onClick={() => { const o = !(panelOpen && tab === 'card'); setTab('card'); setPanelOpen(o); setTrayOpen(false) }}><Icon n="card" size={21} /></button>
+            <button className={'tool mobile-only' + (panelOpen && tab === 'chat' ? ' on' : '')} title="Чат" onClick={() => { const o = !(panelOpen && tab === 'chat'); setTab('chat'); setPanelOpen(o); setTrayOpen(false) }}><Icon n="chat" size={21} />{unread > 0 && <b className="badge dotb">{unread}</b>}</button>
           </div>
           {trayOpen && <AssetTray canEdit={canEdit} onAdd={(t) => { actions.addFromTray(t, center()); mobile && setTrayOpen(false) }} onFiles={(f) => { actions.dropFiles(f, center()); mobile && setTrayOpen(false) }} />}
         </aside>
 
         <div className="canvas-wrap" ref={wrap}>
-          {!canEdit && <div className="readonly-banner" style={{ '--c': layerOwner?.color }}>👁 Вы смотрите личный стол «{layerOwner?.name}» — только просмотр</div>}
+          {!canEdit && <div className="readonly-banner" style={{ '--c': layerOwner?.color }}>Личный стол «{layerOwner?.name}» — только просмотр</div>}
           {filter.length > 0 && <div className="filter-banner">Показаны заметки: {filter.map(f => members[f]?.name).join(', ')}</div>}
-          <Canvas items={items} threads={threads} members={members} me={me} tool={tool} threadKind={threadKind} canEdit={canEdit}
+          {tool === 'draw' && (
+            <div className="tool-opts">
+              {Object.entries(PENS).map(([k, p]) => <button key={k} className={'pen-b' + (pen === k ? ' on' : '')} title={p.name} style={{ '--c': p.color, '--w': Math.min(14, p.width + 2) + 'px' }} onClick={() => setPen(k)}><i /></button>)}
+              <span>{PENS[pen].name}</span>
+            </div>
+          )}
+          {tool === 'stamp' && (
+            <div className="tool-opts">
+              {Object.entries(STAMPS).map(([k, st]) => <button key={k} className={'stamp-b' + (stampKind === k ? ' on' : '')} style={{ '--c': st.color }} onClick={() => setStampKind(k)}>{st.text}</button>)}
+              <span>кликните по материалу</span>
+            </div>
+          )}
+          {tool === 'tape' && <div className="tool-opts"><span>Кликните по материалу, чтобы наклеить скотч</span></div>}
+          <Canvas items={items} threads={threads} strokes={strokes} pen={pen} stampKind={stampKind} members={members} me={me} tool={tool} threadKind={threadKind} canEdit={canEdit}
             view={view} setView={setView} selected={selected}
             onSelect={(id) => { setSelected(id); if (id) { setTab('card'); setPanelOpen(true); setTrayOpen(false) } else if (mobile) setPanelOpen(false) }}
             actions={actions} bus={B.bus} send={B.send} isDim={isDim} title={title} signSub={signSub}
@@ -350,13 +418,13 @@ export default function BoardPage({ code, me, setMe }) {
           <div className="legend">
             {Object.values(THREADS).map(t => <span key={t.name}><i style={{ background: t.color }} />{t.name}</span>)}
           </div>
-          {uploading > 0 && <div className="uploading">⏳ Загружаем файлы ({uploading})…</div>}
+          {uploading > 0 && <div className="uploading">Загрузка файлов ({uploading})…</div>}
         </div>
 
         <aside className={'right' + (panelOpen ? '' : ' closed')}>
           <div className="rtabs">
-            <button className={tab === 'card' ? 'on' : ''} onClick={() => { setTab('card'); setPanelOpen(true) }}>📄 Улика</button>
-            <button className={tab === 'chat' ? 'on' : ''} onClick={() => { setTab('chat'); setPanelOpen(true) }}>💬 Чат {unread > 0 && <b className="badge">{unread}</b>}</button>
+            <button className={tab === 'card' ? 'on' : ''} onClick={() => { setTab('card'); setPanelOpen(true) }}>Материал</button>
+            <button className={tab === 'chat' ? 'on' : ''} onClick={() => { setTab('chat'); setPanelOpen(true) }}>Чат группы {unread > 0 && <b className="badge">{unread}</b>}</button>
             <button className="rclose" onClick={() => setPanelOpen(o => !o)} title="Свернуть">{panelOpen ? '▸' : '◂'}</button>
           </div>
           {panelOpen && tab === 'card' && (
@@ -366,15 +434,26 @@ export default function BoardPage({ code, me, setMe }) {
                 threads={B.threads.filter(t => t.a === selItem.id || t.b === selItem.id)} items={B.items}
                 actions={actions} put={B.put} onClose={() => setSelected(null)} />
               : <div className="empty-panel">
-                <div className="ep-icon">🔍</div>
-                <p>Кликните по любой улике, чтобы раскрыть её: дописать заметки, прикрепить фото, видео, аудио, 3D и посмотреть историю правок.</p>
+                <div className="ep-icon"><Icon n="loupe" size={34} sw={1.3} /></div>
+                <p>Выберите материал на доске, чтобы открыть его: дополнить, прикрепить файлы и посмотреть историю изменений.</p>
                 <ul className="tips">
-                  <li><b>📍 P</b> — приколоть иглой</li>
-                  <li><b>🧵 T</b> — нить от ушка к ушку (1/2/3 — цвет)</li>
+                  <li><b>P</b> — приколоть булавкой</li>
+                  <li><b>T</b> — нить между булавками (1/2/3 — тип связи)</li>
                   <li><b>Пробел</b> + мышь — двигать доску, колесо — масштаб</li>
                   <li>Перетащите файлы с компьютера прямо на доску</li>
                   <li>Ctrl+V — вставить картинку из буфера</li>
                 </ul>
+                {archive.length > 0 && (
+                  <details className="archive">
+                    <summary>Архив уничтоженных материалов ({archive.length})</summary>
+                    {archive.map(a => (
+                      <div key={a.id} className="arch-row">
+                        <span>{DESTROY[a.destroyed]?.name}: {a.title || 'без названия'}</span>
+                        {canEdit && <button className="link" onClick={() => actions.restoreItem(a.id)}>↺ вернуть</button>}
+                      </div>
+                    ))}
+                  </details>
+                )}
                 <button className="btn sm" onClick={() => { const m = newTabIdentity(); setMe({ ...m }) }} title="Для проверки совместной работы в другой вкладке">Войти в этой вкладке как другой участник</button>
               </div>
           )}
@@ -385,7 +464,11 @@ export default function BoardPage({ code, me, setMe }) {
       <div className="toasts">
         {toasts.map(t => <div key={t.id} className="toast" style={{ '--c': t.color || '#f2c12e' }}>{t.text}</div>)}
       </div>
-      {profile && <NameModal me={me} title="Ваш профиль" onSave={(m) => { setMe(m); setProfile(false) }} />}
+      {profile && <NameModal me={me} role={members[me.id]?.role || ''} title="Ваш профиль" onSave={(m) => {
+        const { role, ...rest } = m
+        setMe(rest); setProfile(false)
+        if (role !== undefined && role !== (members[me.id]?.role || '')) B.put('member', { role }, B.board.id + '_' + me.id)
+      }} />}
       {renaming && <RenameModal title={B.title} onClose={() => setRenaming(false)} onSave={(t) => { B.put('meta', { title: t }, B.board.id + '_meta'); setRenaming(false) }} />}
     </div>
   )
@@ -398,8 +481,7 @@ function RenameModal({ title, onSave, onClose }) {
       <form className="modal chalk-modal" onSubmit={(e) => { e.preventDefault(); v.trim() && onSave(v.trim()) }}>
         <h2>Название дела</h2>
         <input autoFocus value={v} maxLength={48} onChange={e => setV(e.target.value)} />
-        <div className="chalk-preview"><div className="chalk-text">{v || '…'}</div></div>
-        <div className="row"><button type="button" className="btn" onClick={onClose}>Отмена</button><button className="btn primary">Написать мелом</button></div>
+                <div className="row"><button type="button" className="btn" onClick={onClose}>Отмена</button><button className="btn primary">Сохранить</button></div>
       </form>
     </div>
   )

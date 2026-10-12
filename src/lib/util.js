@@ -20,9 +20,9 @@ export const normCode = (c) => {
 export const PALETTE = ['#e5484d', '#3b82f6', '#22a565', '#f59e0b', '#a855f7', '#ec4899', '#14b8a6', '#f97316', '#64748b', '#84cc16']
 
 export const THREADS = {
-  fact: { color: '#d4202a', name: 'Точный факт', short: 'Факт' },
-  maybe: { color: '#f2c12e', name: 'Неточный факт', short: 'Возможно' },
-  reason: { color: '#2fa84f', name: 'Рассуждение', short: 'Мысль' },
+  fact: { color: '#b3141c', name: 'Установленный факт', short: 'Факт' },
+  maybe: { color: '#d9a521', name: 'Не подтверждено', short: 'Под вопросом' },
+  reason: { color: '#2f7d46', name: 'Версия / рассуждение', short: 'Версия' },
 }
 
 export const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
