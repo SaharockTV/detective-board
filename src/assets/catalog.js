@@ -19,8 +19,9 @@ export const TEMPLATES = [
 ]
 export const TPL = Object.fromEntries(TEMPLATES.map(t => [t.type, t]))
 TPL.tent = { type: 'tent', name: 'Метка' }
+TPL.link = { type: 'link', name: 'Ссылка', w: 280, h: 230, title: '' }
 
-export const typeForKind = { image: 'photo', video: 'video', audio: 'audio', model: 'model', file: 'folder' }
+export const typeForKind = { image: 'photo', video: 'video', audio: 'audio', model: 'model', file: 'folder', link: 'link' }
 export const PHOTO_TYPES = new Set(['polaroid', 'photo', 'suspect', 'evidence', 'map'])
 
 export function makeItem(type, { x, y, owner, layer, photo, media, title, text, z, fields }) {

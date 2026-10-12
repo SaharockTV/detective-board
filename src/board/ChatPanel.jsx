@@ -2,9 +2,12 @@ import Icon from '../components/Icon'
 import React, { useEffect, useRef, useState } from 'react'
 import { Thumb, MediaView } from '../components/Media'
 import { uid, fmtTime, initials } from '../lib/util'
+import { LibraryModal } from './Library'
 
-export default function ChatPanel({ me, members, messages, put, upload, items, focus, selected }) {
+export default function ChatPanel({ me, members, messages, put, upload, items, focus, selected, library = [], addLink }) {
   const [text, setText] = useState('')
+  const [picked, setPicked] = useState([])
+  const [libOpen, setLibOpen] = useState(false)
   const [files, setFiles] = useState([])
   const [remind, setRemind] = useState(false)
   const [to, setTo] = useState('all')
@@ -19,16 +22,16 @@ export default function ChatPanel({ me, members, messages, put, upload, items, f
 
   async function send(e) {
     e?.preventDefault()
-    if (!text.trim() && !files.length) return
+    if (!text.trim() && !files.length && !picked.length) return
     setBusy(true)
-    const up = []
+    const up = [...picked]
     for (const f of files) { try { up.push(await upload(f)) } catch (err) { alert('Не загрузилось: ' + f.name) } }
     put('message', {
       id: uid(), author: me.id, text: text.trim(), ts: Date.now(), files: up,
       remind: remind ? { to, at: at || null, done: false } : null,
       item: ref && selected ? { id: selected.id, title: selected.title } : null,
     })
-    setText(''); setFiles([]); setRemind(false); setAt(''); setRef(false); setBusy(false)
+    setText(''); setFiles([]); setPicked([]); setRemind(false); setAt(''); setRef(false); setBusy(false)
   }
 
   const mine = messages.filter(m => m.remind && !m.remind.done && (m.remind.to === 'all' || m.remind.to === me.id))
@@ -68,7 +71,7 @@ export default function ChatPanel({ me, members, messages, put, upload, items, f
       </div>
       {open && <div className="lightbox" onClick={() => setOpen(null)}><div onClick={e => e.stopPropagation()}><MediaView m={open} /></div></div>}
       <form className="composer" onSubmit={send}>
-        {files.length > 0 && <div className="cf">{files.map((f, i) => <span key={i}>{f.name} <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))}>×</button></span>)}</div>}
+        {(files.length > 0 || picked.length > 0) && <div className="cf">{files.map((f, i) => <span key={i}>{f.name} <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))}>×</button></span>)}{picked.map((m, i) => <span key={'p' + i}>{m.link?.title || m.name} <button type="button" onClick={() => setPicked(picked.filter((_, j) => j !== i))}>×</button></span>)}</div>}
         {remind && (
           <div className="rem-opts">
             <select value={to} onChange={e => setTo(e.target.value)}>
@@ -83,6 +86,7 @@ export default function ChatPanel({ me, members, messages, put, upload, items, f
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
         <div className="cbar">
           <button type="button" title="Файлы" onClick={() => fileRef.current.click()}><Icon n="clip" size={18} /></button>
+          <button type="button" title="Из библиотеки" onClick={() => setLibOpen(true)}><Icon n="library" size={18} /></button>
           <button type="button" className={remind ? 'on' : ''} title="Напоминание" onClick={() => setRemind(r => !r)}><Icon n="clock" size={18} /></button>
           {selected && <button type="button" className={ref ? 'on' : ''} title={'Сослаться на «' + (selected.title || 'улику') + '»'} onClick={() => setRef(r => !r)}><Icon n="link" size={18} /></button>}
           <span className="grow" />
@@ -90,6 +94,7 @@ export default function ChatPanel({ me, members, messages, put, upload, items, f
         </div>
         <input ref={fileRef} type="file" multiple hidden onChange={e => { setFiles([...files, ...e.target.files]); e.target.value = '' }} />
       </form>
+      {libOpen && <LibraryModal library={library} members={members} canEdit upload={upload} addLink={addLink} onClose={() => setLibOpen(false)} onPick={(l) => { setPicked(p => [...p, ...l.filter(m => !p.some(x => x.url === m.url))]); setLibOpen(false) }} />}
     </div>
   )
 }

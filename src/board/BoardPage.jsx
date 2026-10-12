@@ -6,6 +6,7 @@ import { DESTROY } from './Destroy'
 import AssetTray from './AssetTray'
 import DetailPanel from './DetailPanel'
 import ChatPanel from './ChatPanel'
+import Library from './Library'
 import NameModal from '../components/NameModal'
 import { ChalkDefs } from '../components/Chalk'
 import { makeItem, typeForKind, TPL } from '../assets/catalog'
@@ -170,6 +171,7 @@ export default function BoardPage({ code, me, setMe }) {
       return it
     },
     addFromTray(t, pt) {
+      if (t.media) return actions.placeMedia(t.media, pt)
       if (t.photo) return actions.addItem(t.type || 'polaroid', pt, { photo: t.photo, title: t.photo.name })
       return actions.addItem(t.type, pt)
     },
@@ -199,6 +201,25 @@ export default function BoardPage({ code, me, setMe }) {
         } catch (e) { toast('Ошибка загрузки: ' + (e.message || e), '#e5484d') }
         setUploading(u => u - 1)
       }
+    },
+    placeMedia(m, pt) {
+      if (!canEdit) return
+      if (!pt) { const c = center(), a = Math.random() * Math.PI * 2, r = 120 + Math.random() * 160; pt = { x: c.x + Math.cos(a) * r * 1.4, y: c.y + Math.sin(a) * r + 120 } }
+      const title = (m.link?.title || m.name || '').replace(/\.[^.]{1,5}$/, '').slice(0, 40)
+      return actions.addItem(typeForKind[m.kind] || 'folder', pt, { media: m, title })
+    },
+    attachMedia(id, list) {
+      const it = findItem(id); if (!it) return
+      const have = new Set((it.media || []).map(x => x.url))
+      const add = list.filter(m => !have.has(m.url))
+      if (!add.length) return toast('Уже прикреплено')
+      const hasImg = add.some(m => m.kind === 'image')
+      B.put('item', { media: [...(it.media || []).filter(x => !(x.id === 'art' && hasImg)), ...add] }, id)
+      add.forEach(m => log(id, 'attach', { text: m.link?.title || m.name }))
+      toast(add.length > 1 ? `Прикреплено: ${add.length}` : 'Прикреплено к «' + (it.title || 'улике') + '»')
+    },
+    removeFromLibrary(m) {
+      B.put('media', { url: m.url, deleted: true }, 'lib_' + m.id)
     },
     removeMedia(id, mid) {
       const it = findItem(id)
@@ -262,7 +283,9 @@ export default function BoardPage({ code, me, setMe }) {
     const paste = (e) => {
       if (e.target.closest('input,textarea')) return
       const files = [...(e.clipboardData?.files || [])]
-      if (files.length && canEdit) actions.dropFiles(files, center())
+      if (files.length && canEdit) return actions.dropFiles(files, center())
+      const txt = (e.clipboardData?.getData('text') || '').trim()
+      if (canEdit && /^https?:\/\/\S+$/i.test(txt)) B.addLink(txt).then(m => { actions.placeMedia(m); toast('Ссылка добавлена в библиотеку и на доску') }).catch(() => {})
     }
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('paste', paste)
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('paste', paste) }
@@ -383,6 +406,7 @@ export default function BoardPage({ code, me, setMe }) {
             </div>
             <button className={'tool' + (trayOpen ? ' on' : '')} title="Набор улик" onClick={() => { setTrayOpen(o => !o); mobile && setPanelOpen(false) }}><Icon n="tray" size={21} /></button>
             <button className={'tool mobile-only' + (panelOpen && tab === 'card' ? ' on' : '')} title="Улика" onClick={() => { const o = !(panelOpen && tab === 'card'); setTab('card'); setPanelOpen(o); setTrayOpen(false) }}><Icon n="card" size={21} /></button>
+            <button className={'tool' + (panelOpen && tab === 'lib' ? ' on' : '')} title="Библиотека материалов" onClick={() => { const o = !(panelOpen && tab === 'lib'); setTab('lib'); setPanelOpen(o); mobile && setTrayOpen(false) }}><Icon n="library" size={21} /></button>
             <button className={'tool mobile-only' + (panelOpen && tab === 'chat' ? ' on' : '')} title="Чат" onClick={() => { const o = !(panelOpen && tab === 'chat'); setTab('chat'); setPanelOpen(o); setTrayOpen(false) }}><Icon n="chat" size={21} />{unread > 0 && <b className="badge dotb">{unread}</b>}</button>
           </div>
           {trayOpen && <AssetTray canEdit={canEdit} onAdd={(t) => { actions.addFromTray(t, center()); mobile && setTrayOpen(false) }} onFiles={(f) => { actions.dropFiles(f, center()); mobile && setTrayOpen(false) }} />}
@@ -424,7 +448,8 @@ export default function BoardPage({ code, me, setMe }) {
         <aside className={'right' + (panelOpen ? '' : ' closed')}>
           <div className="rtabs">
             <button className={tab === 'card' ? 'on' : ''} onClick={() => { setTab('card'); setPanelOpen(true) }}>Материал</button>
-            <button className={tab === 'chat' ? 'on' : ''} onClick={() => { setTab('chat'); setPanelOpen(true) }}>Чат группы {unread > 0 && <b className="badge">{unread}</b>}</button>
+            <button className={tab === 'chat' ? 'on' : ''} onClick={() => { setTab('chat'); setPanelOpen(true) }}>Чат {unread > 0 && <b className="badge">{unread}</b>}</button>
+            <button className={tab === 'lib' ? 'on' : ''} onClick={() => { setTab('lib'); setPanelOpen(true) }}>Библиотека <span className="cnt">{B.library.length || ''}</span></button>
             <button className="rclose" onClick={() => setPanelOpen(o => !o)} title="Свернуть">{panelOpen ? '▸' : '◂'}</button>
           </div>
           {panelOpen && tab === 'card' && (
@@ -432,7 +457,7 @@ export default function BoardPage({ code, me, setMe }) {
               ? <DetailPanel key={selItem.id} item={selItem} me={me} members={members} history={B.history[selItem.id] || []}
                 canEdit={(selItem.layer || 'main') === 'main' || selItem.layer === me.id}
                 threads={B.threads.filter(t => t.a === selItem.id || t.b === selItem.id)} items={B.items}
-                actions={actions} put={B.put} onClose={() => setSelected(null)} />
+                actions={actions} put={B.put} onClose={() => setSelected(null)} library={B.library} upload={B.upload} addLink={B.addLink} />
               : <div className="empty-panel">
                 <div className="ep-icon"><Icon n="loupe" size={34} sw={1.3} /></div>
                 <p>Выберите материал на доске, чтобы открыть его: дополнить, прикрепить файлы и посмотреть историю изменений.</p>
@@ -441,7 +466,8 @@ export default function BoardPage({ code, me, setMe }) {
                   <li><b>T</b> — нить между булавками (1/2/3 — тип связи)</li>
                   <li><b>Пробел</b> + мышь — двигать доску, колесо — масштаб</li>
                   <li>Перетащите файлы с компьютера прямо на доску</li>
-                  <li>Ctrl+V — вставить картинку из буфера</li>
+                  <li>Ctrl+V — вставить картинку или ссылку из буфера</li>
+                  <li>Все файлы и ссылки дела — во вкладке «Библиотека»</li>
                 </ul>
                 {archive.length > 0 && (
                   <details className="archive">
@@ -457,7 +483,10 @@ export default function BoardPage({ code, me, setMe }) {
                 <button className="btn sm" onClick={() => { const m = newTabIdentity(); setMe({ ...m }) }} title="Для проверки совместной работы в другой вкладке">Войти в этой вкладке как другой участник</button>
               </div>
           )}
-          {panelOpen && tab === 'chat' && <ChatPanel me={me} members={members} messages={B.messages} put={B.put} upload={B.upload} items={B.items} focus={actions.focus} selected={selItem} />}
+          {panelOpen && tab === 'chat' && <ChatPanel me={me} members={members} messages={B.messages} put={B.put} upload={B.upload} items={B.items} focus={actions.focus} selected={selItem} library={B.library} addLink={B.addLink} />}
+          {panelOpen && tab === 'lib' && <Library library={B.library} members={members} canEdit={canEdit} upload={B.upload} addLink={B.addLink}
+            onRemove={actions.removeFromLibrary} onPlace={(m) => { actions.placeMedia(m); mobile && setPanelOpen(false) }}
+            onAttach={(m) => actions.attachMedia(selItem.id, [m])} attachTo={selItem && ((selItem.layer || 'main') === 'main' || selItem.layer === me.id) ? selItem : null} focus={actions.focus} />}
         </aside>
       </div>
 

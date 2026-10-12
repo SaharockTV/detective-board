@@ -38,11 +38,36 @@ export const fmtTime = (ts) => new Date(ts).toLocaleString('ru-RU', { day: '2-di
 
 export function fileKind(mime = '', name = '') {
   const n = name.toLowerCase()
-  if (/\.(glb|gltf)$/.test(n) || mime.includes('gltf')) return 'model'
-  if (mime.startsWith('image/')) return 'image'
-  if (mime.startsWith('video/')) return 'video'
-  if (mime.startsWith('audio/') || /\.(mp3|wav|ogg|m4a)$/.test(n)) return 'audio'
+  if (/\.(glb|gltf|obj|stl|fbx|usdz|3ds|ply)$/.test(n) || mime.includes('gltf') || mime.startsWith('model/')) return 'model'
+  if (mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/.test(n)) return 'image'
+  if (mime.startsWith('video/') || /\.(mp4|webm|mov|mkv|avi|m4v)$/.test(n)) return 'video'
+  if (mime.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac|opus)$/.test(n)) return 'audio'
   return 'file'
+}
+// Категория для библиотеки: GIF отдельно от фото, остальное по виду
+export function mediaCat(m) {
+  if (!m) return 'file'
+  if (m.kind === 'image' && (/gif/.test(m.mime || '') || /\.gif(\?|$)/i.test(m.name || m.url || ''))) return 'gif'
+  return m.kind || 'file'
+}
+export const isGltf = (m) => /\.(glb|gltf)(\?|$)/i.test(m?.name || '') || /\.(glb|gltf)(\?|$)/i.test(m?.url || '') || (m?.mime || '').includes('gltf')
+
+// Разбор ссылки: видеохостинги, прямые файлы, обычные страницы
+export function parseLink(raw) {
+  let u
+  try { u = new URL(/^https?:\/\//i.test(raw) ? raw : 'https://' + raw) } catch { return null }
+  const host = u.hostname.replace(/^www\./, '')
+  const path = u.pathname.toLowerCase()
+  let yt = null
+  if (/youtube\.com$/.test(host)) yt = u.searchParams.get('v') || (path.match(/\/(shorts|embed|live)\/([\w-]{6,})/) || [])[2]
+  if (host === 'youtu.be') yt = u.pathname.slice(1).split('/')[0]
+  if (yt) return { href: u.href, host, provider: 'youtube', embed: 'https://www.youtube.com/embed/' + yt, thumb: `https://i.ytimg.com/vi/${yt}/hqdefault.jpg` }
+  const vm = /vimeo\.com$/.test(host) && path.match(/\/(\d+)/)
+  if (vm) return { href: u.href, host, provider: 'vimeo', embed: 'https://player.vimeo.com/video/' + vm[1] }
+  const rt = /rutube\.ru$/.test(host) && path.match(/\/video\/([\w]+)/)
+  if (rt) return { href: u.href, host, provider: 'rutube', embed: 'https://rutube.ru/play/embed/' + rt[1] }
+  const kind = fileKind('', path)
+  return { href: u.href, host, provider: kind === 'file' ? 'web' : kind, kind }
 }
 export const fmtSize = (b) => b > 1048576 ? (b / 1048576).toFixed(1) + ' МБ' : Math.max(1, Math.round(b / 1024)) + ' КБ'
 

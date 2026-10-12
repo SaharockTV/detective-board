@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { getBackend } from './backend'
-import { uid } from './util'
+import { uid, parseLink } from './util'
 import { pushRecent } from './identity'
 
 // Простой эмиттер для частых событий (курсоры, перетаскивание)
@@ -92,13 +92,37 @@ export function useBoard(code, me) {
 
   const send = useCallback((evt) => session.current?.send(evt), [])
   const track = useCallback((st) => session.current?.track(st), [])
-  const upload = useCallback((file) => backend.current.upload(boardRef.current.id, file), [])
+  // Любая загрузка (доска, карточка, чат, библиотека) попадает в библиотеку дела
+  const upload = useCallback(async (file, extra = {}) => {
+    const m = await backend.current.upload(boardRef.current.id, file)
+    put('media', { ...m, by: meRef.current.id, ts: Date.now(), ...extra }, 'lib_' + m.id)
+    return m
+  }, [put])
+  const addLink = useCallback(async (raw) => {
+    const L = parseLink(raw.trim())
+    if (!L) throw new Error('Не похоже на ссылку')
+    const id = uid()
+    const file = decodeURIComponent(L.href.split(/[?#]/)[0].split('/').pop() || L.host)
+    const m = L.kind && L.kind !== 'file'
+      ? { id, url: L.href, name: file, mime: '', kind: L.kind, src: 'link' }
+      : { id, url: L.href, name: L.host, mime: 'text/uri-list', kind: 'link', link: { provider: L.provider, host: L.host, embed: L.embed, thumb: L.thumb } }
+    put('media', { ...m, by: meRef.current.id, ts: Date.now() }, 'lib_' + id)
+    if (m.kind === 'link') {
+      fetch('/api/meta?url=' + encodeURIComponent(L.href)).then(r => r.ok ? r.json() : null).then(j => {
+        if (!j || (!j.title && !j.image)) return
+        put('media', { name: j.title || m.name, link: { ...m.link, title: j.title, desc: j.description, thumb: m.link.thumb || j.image, site: j.site } }, 'lib_' + id)
+      }).catch(() => {})
+    }
+    return m
+  }, [put])
 
   const derived = useMemo(() => {
     const items = [], threads = [], messages = [], members = [], strokes = [], history = {}
     let meta = null
+    const libRows = [], hidden = new Set()
     for (const r of rows.current.values()) {
       const d = r.data
+      if (r.kind === 'media') { if (d.deleted) hidden.add(d.url); else libRows.push({ ...d, _ts: r.updated_at }); continue }
       if (d.deleted) continue
       if (r.kind === 'item') items.push({ ...d, _ts: r.updated_at })
       else if (r.kind === 'thread') threads.push(d)
@@ -113,10 +137,22 @@ export function useBoard(code, me) {
     members.sort((a, b) => a.joined - b.joined)
     for (const k in history) history[k].sort((a, b) => b.ts - a.ts)
     strokes.sort((a, b) => a.ts - b.ts)
-    return { items, threads, messages, members, strokes, history, meta }
+    // Библиотека: загруженное напрямую + всё, что прикреплено к уликам и сообщениям
+    const lib = new Map()
+    const add = (m, src, by, ts) => {
+      if (!m?.url || m.id === 'art' || hidden.has(m.url)) return
+      const cur = lib.get(m.url) || { ...m, by, ts, used: [] }
+      if (src) cur.used.push(src)
+      lib.set(m.url, cur)
+    }
+    libRows.forEach(m => add(m, null, m.by, m.ts || m._ts))
+    items.forEach(it => (it.media || []).forEach(m => add(m, { item: it.id, title: it.title, layer: it.layer || 'main' }, it.owner, it.created)))
+    messages.forEach(msg => (msg.files || []).forEach(m => add(m, { msg: msg.id }, msg.author, msg.ts)))
+    const library = [...lib.values()].sort((a, b) => (b.ts || 0) - (a.ts || 0))
+    return { items, threads, messages, members, strokes, history, meta, library }
   }, [ver])
 
   const title = derived.meta?.title || board?.title || ''
 
-  return { status, board, title, ...derived, presence, put, putMany, send, track, upload, bus, rows, backend }
+  return { status, board, title, ...derived, presence, put, putMany, send, track, upload, addLink, bus, rows, backend }
 }

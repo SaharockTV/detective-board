@@ -29,6 +29,7 @@ const P = {
   clip: <path d="M8 12l6-6a3 3 0 014 4l-8 8a5 5 0 01-7-7l7-7" />,
   fire: <path d="M12 21c-4 0-6-2.5-6-6 0-4 4-6 4-11 3 2 7 6 7 11 0 3.5-2 6-5 6z" />,
   archive: <><path d="M3 4h18v4H3z" /><path d="M5 8v12h14V8" /><path d="M10 12h4" /></>,
+  library: <><path d="M4 4h4v16H4z" /><path d="M10 4h4v16h-4z" /><path d="M16.5 4.5l3.6 1 -3.9 14.5-3.6-1z" /></>,
   plus: <path d="M12 5v14M5 12h14" />,
 }
 

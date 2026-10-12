@@ -1,5 +1,5 @@
 import React, { memo } from 'react'
-import { Img, VideoThumb, Model } from '../components/Media'
+import { Img, VideoThumb, Model, Favicon } from '../components/Media'
 import { initials } from '../lib/util'
 
 const STAMP_TEXT = { secret: ['СЕКРЕТНО', '#b91c1c'], ok: ['ПОДТВЕРЖДЕНО', '#15803d'], lie: ['ЛОЖЬ', '#b91c1c'], checked: ['ПРОВЕРЕНО', '#1d4ed8'], alibi: ['АЛИБИ', '#7c3aed'], closed: ['ЗАКРЫТО', '#334155'] }
@@ -74,6 +74,17 @@ function Faces({ it }) {
       const m = ofKind(it, 'model')
       return <><div className="md-box">{m ? <Model m={m} interactive={false} /> : <div className="md-empty">3D<small>загрузите .glb</small></div>}</div><div className="md-cap">{it.title}</div></>
     }
+    case 'link': {
+      const l = ofKind(it, 'link'), L = l?.link || {}
+      return (
+        <>
+          <div className="lk-bar"><Favicon host={L.host} /><span>{L.host || 'ссылка'}</span><em>{fmtD(it.created)}</em></div>
+          <div className={'lk-shot' + (L.embed ? ' vid' : '')}>{L.thumb ? <img src={L.thumb} alt="" referrerPolicy="no-referrer" draggable={false} /> : <div className="lk-none">{L.host || 'URL'}</div>}{L.embed && <i className="lk-play" />}</div>
+          <div className="lk-title">{it.title || L.title || l?.name}</div>
+          <div className="lk-url">{l?.url}</div>
+        </>
+      )
+    }
     case 'tent': return <div className="tent"><div className="tent-face"><b>{it.num || '?'}</b></div><div className="tent-side" /></div>
     case 'question': return <div className="q-mark pen">{it.title || '?'}<small>{it.text}</small></div>
     default: return <div className="pen">{it.title}</div>
@@ -83,7 +94,7 @@ function Faces({ it }) {
 function Card({ it, x, y, w, h, rot, owner, selected, dim, showHandles, appends, lifted }) {
   const now = Date.now()
   const extra = (it.media || []).filter(m => m.id !== 'art')
-  const showClip = !['polaroid', 'photo', 'suspect', 'evidence', 'map', 'video', 'audio', 'model', 'newspaper', 'tent'].includes(it.type) && extra.some(m => m.kind === 'image')
+  const showClip = !['polaroid', 'photo', 'suspect', 'evidence', 'map', 'video', 'audio', 'model', 'newspaper', 'tent', 'link'].includes(it.type) && extra.some(m => m.kind === 'image')
   return (
     <div
       className={`card c-${it.type}${it.pin ? ' pinned' : ' loose'}${selected ? ' sel' : ''}${dim ? ' dim' : ''}${lifted ? ' lifted' : ''}`}

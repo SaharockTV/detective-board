@@ -2,11 +2,13 @@ import React, { useEffect, useRef, useState } from 'react'
 import { TPL } from '../assets/catalog'
 import { MediaView, useAutoGrow } from '../components/Media'
 import { DESTROY } from './Destroy'
+import { LibraryModal } from './Library'
 import { THREADS, timeAgo, fmtTime, uid, initials } from '../lib/util'
 
 const ACT = { create: 'создал(а) улику', edit: 'изменил(а) текст', append: 'дописал(а)', attach: 'прикрепил(а) файл', detach: 'убрал(а) файл', pin: 'приколол(а) иглой', unpin: 'снял(а) с иглы', thread: 'протянул(а) нить', restore: 'восстановил(а)', destroy: 'уничтожил(а) улику', stamp: 'поставил(а) штамп' }
 
-export default function DetailPanel({ item, me, members, history, canEdit, threads, items, actions, put, onClose }) {
+export default function DetailPanel({ item, me, members, history, canEdit, threads, items, actions, put, onClose, library = [], upload, addLink }) {
+  const [libOpen, setLibOpen] = useState(false)
   const [title, setTitle] = useState(item.title || '')
   const [text, setText] = useState(item.text || '')
   const [fields, setFields] = useState(item.fields || null)
@@ -64,6 +66,8 @@ export default function DetailPanel({ item, me, members, history, canEdit, threa
 
   const onDrop = (e) => {
     e.preventDefault(); setOver(false)
+    const lm = e.dataTransfer.getData('application/x-media')
+    if (canEdit && lm) return actions.attachMedia(item.id, [JSON.parse(lm)])
     if (canEdit && e.dataTransfer.files?.length) actions.attach(item.id, [...e.dataTransfer.files])
   }
 
@@ -129,7 +133,7 @@ export default function DetailPanel({ item, me, members, history, canEdit, threa
 
       <section className="dt-sec">
         <div className="dt-sec-h">Материалы <span>{media.filter(m => m.id !== 'art').length}</span>
-          {canEdit && <button className="btn sm" onClick={() => fileRef.current.click()}>Прикрепить файл</button>}
+          {canEdit && <span className="dt-btns"><button className="btn sm" onClick={() => setLibOpen(true)}>Из библиотеки</button><button className="btn sm" onClick={() => fileRef.current.click()}>Файл</button></span>}
         </div>
         <input ref={fileRef} type="file" multiple hidden onChange={e => { actions.attach(item.id, [...e.target.files]); e.target.value = '' }} />
         <div className="dt-media">
@@ -139,7 +143,7 @@ export default function DetailPanel({ item, me, members, history, canEdit, threa
               {canEdit && <button className="rm" title="Убрать" onClick={() => actions.removeMedia(item.id, m.id)}>×</button>}
             </div>
           ))}
-          {media.length === 0 && <div className="dt-drop">Перетащите сюда фото, видео, mp3 или .glb-модель</div>}
+          {media.length === 0 && <div className="dt-drop">Перетащите сюда фото, видео, GIF, аудио, .glb-модель — или материал из библиотеки</div>}
         </div>
       </section>
 
@@ -192,6 +196,7 @@ export default function DetailPanel({ item, me, members, history, canEdit, threa
           </div>
         )}
       </div>
+      {libOpen && <LibraryModal library={library} members={members} canEdit={canEdit} upload={upload} addLink={addLink} onClose={() => setLibOpen(false)} onPick={(l) => { actions.attachMedia(item.id, l); setLibOpen(false) }} />}
     </div>
   )
 }

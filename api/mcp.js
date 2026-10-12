@@ -5,9 +5,37 @@ const SB_KEY = process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY
 const AI = { user: 'ai', name: 'ИИ-напарник', color: '#7c5cff' }
 const THREADS = { fact: 'Точный факт', maybe: 'Неточный факт', reason: 'Рассуждение' }
 const TYPES = ['polaroid', 'photo', 'torn', 'sticky', 'index', 'suspect', 'newspaper', 'report', 'evidence', 'map', 'receipt', 'folder', 'question']
-const SIZE = { polaroid: [200, 240], photo: [230, 180], torn: [230, 260], sticky: [170, 170], index: [260, 160], suspect: [280, 200], newspaper: [260, 230], report: [250, 300], evidence: [210, 250], map: [280, 220], receipt: [150, 240], folder: [260, 190], question: [150, 150] }
+const SIZE = { link: [280, 230], video: [290, 210], audio: [260, 160], model: [230, 230], polaroid: [200, 240], photo: [230, 180], torn: [230, 260], sticky: [170, 170], index: [260, 160], suspect: [280, 200], newspaper: [260, 230], report: [250, 300], evidence: [210, 250], map: [280, 220], receipt: [150, 240], folder: [260, 190], question: [150, 150] }
 const STAMPS = { secret: 'СЕКРЕТНО', ok: 'ПОДТВЕРЖДЕНО', lie: 'ЛОЖЬ', checked: 'ПРОВЕРЕНО', alibi: 'АЛИБИ', closed: 'ЗАКРЫТО' }
 
+const CATS = { image: 'фото', gif: 'gif', video: 'видео', audio: 'аудио', model: '3d', link: 'ссылка', file: 'документ' }
+const cat = (m) => m.kind === 'image' && /gif/i.test((m.mime || '') + (m.name || '')) ? 'gif' : (m.kind || 'file')
+const CARD_FOR = { image: 'photo', video: 'video', audio: 'audio', model: 'model', link: 'link', file: 'folder' }
+function kindOf(url) {
+  const p = url.toLowerCase().split(/[?#]/)[0]
+  if (/\.(glb|gltf|obj|stl|fbx|usdz)$/.test(p)) return 'model'
+  if (/\.(png|jpe?g|gif|webp|avif|bmp|svg)$/.test(p)) return 'image'
+  if (/\.(mp4|webm|mov|m4v)$/.test(p)) return 'video'
+  if (/\.(mp3|wav|ogg|m4a|aac|flac)$/.test(p)) return 'audio'
+  return 'link'
+}
+function linkInfo(url) {
+  const u = new URL(url), host = u.hostname.replace(/^www\./, '')
+  const yt = /youtube\.com$/.test(host) ? u.searchParams.get('v') || (u.pathname.match(/\/(shorts|embed|live)\/([\w-]{6,})/) || [])[2] : host === 'youtu.be' ? u.pathname.slice(1) : null
+  if (yt) return { provider: 'youtube', host, embed: 'https://www.youtube.com/embed/' + yt, thumb: `https://i.ytimg.com/vi/${yt}/hqdefault.jpg` }
+  const vm = /vimeo\.com$/.test(host) && u.pathname.match(/\/(\d+)/)
+  if (vm) return { provider: 'vimeo', host, embed: 'https://player.vimeo.com/video/' + vm[1] }
+  return { provider: 'web', host }
+}
+function library(all) {
+  const hidden = new Set(all.filter(r => r.kind === 'media' && r.data.deleted).map(r => r.data.url))
+  const lib = new Map()
+  const add = (m, used) => { if (!m?.url || m.id === 'art' || hidden.has(m.url)) return; const c = lib.get(m.url) || { ...m, used: [] }; if (used) c.used.push(used); lib.set(m.url, c) }
+  live(all).filter(r => r.kind === 'media').forEach(r => add(r.data))
+  live(all).filter(r => r.kind === 'item').forEach(r => (r.data.media || []).forEach(m => add(m, r.data.id)))
+  live(all).filter(r => r.kind === 'message').forEach(r => (r.data.files || []).forEach(m => add(m)))
+  return [...lib.values()]
+}
 const uid = () => (Date.now().toString(36) + Math.random().toString(36).slice(2, 12))
 const normCode = (c) => { const s = String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); return s.length === 8 ? s.slice(0, 4) + '-' + s.slice(4) : s }
 
@@ -61,7 +89,7 @@ function caseView(b, all, { layer = 'main' } = {}) {
       id: i.id, type: i.type, title: i.title, text: i.text || undefined,
       fields: i.fields?.length ? Object.fromEntries(i.fields) : undefined,
       invisible_ink: i.uv || undefined, stamps: (i.marks || []).filter(m => m.t === 'stamp').map(m => STAMPS[m.k] || m.k),
-      pinned: !!i.pin, author: mname(i.owner), files: (i.media || []).filter(m => m.id !== 'art').map(m => m.name),
+      pinned: !!i.pin, author: mname(i.owner), files: (i.media || []).filter(m => m.id !== 'art').map(m => ({ name: m.link?.title || m.name, type: CATS[cat(m)], url: m.url })),
       x: i.x, y: i.y,
     })),
     threads: L.filter(r => r.kind === 'thread' && (r.data.layer || 'main') === layer && byId[r.data.a] && byId[r.data.b]).map(r => ({
@@ -88,6 +116,9 @@ const TOOLS = [
   { name: 'add_card', description: 'Добавить улику на общую доску.', inputSchema: S({ code, type: { type: 'string', enum: TYPES, description: 'вид бумажки: sticky — стикер, torn — заметка, index — карточка, suspect — подозреваемый, question — вопрос, report — протокол и т.п.' }, title: { type: 'string' }, text: { type: 'string' }, fields: { type: 'object', description: 'для suspect: {"Возраст":"42","Алиби":"..."}', additionalProperties: { type: 'string' } }, invisible_ink: { type: 'string', description: 'текст, видимый только под УФ-лампой' }, near_item_id: { type: 'string', description: 'положить рядом с этой уликой' }, pin: { type: 'boolean', description: 'сразу приколоть иглой (нужно для нитей)' } }, ['code', 'title']) },
   { name: 'update_card', description: 'Изменить улику: заголовок/текст, или дописать заметку от ИИ.', inputSchema: S({ code, item_id: { type: 'string' }, title: { type: 'string' }, text: { type: 'string' }, append: { type: 'string', description: 'дописать строку (видно, что дописал ИИ)' } }, ['code', 'item_id']) },
   { name: 'add_thread', description: 'Протянуть нить между двумя уликами (обе будут приколоты иглами).', inputSchema: S({ code, from_item_id: { type: 'string' }, to_item_id: { type: 'string' }, kind: { type: 'string', enum: Object.keys(THREADS), description: 'fact — красная (точный факт), maybe — жёлтая (неточный), reason — зелёная (рассуждение)' }, label: { type: 'string' } }, ['code', 'from_item_id', 'to_item_id']) },
+  { name: 'list_library', description: 'Библиотека материалов дела: все загруженные фото, GIF, видео, аудио, 3D-модели, документы и ссылки (в т.ч. прикреплённые к уликам и в чате).', inputSchema: S({ code, type: { type: 'string', enum: Object.values(CATS), description: 'фильтр по виду' } }, ['code']) },
+  { name: 'add_to_library', description: 'Добавить ссылку в библиотеку дела (страница, YouTube/Vimeo, прямой URL картинки/видео/аудио/.glb). Можно сразу положить на доску или прикрепить к улике.', inputSchema: S({ code, url: { type: 'string' }, title: { type: 'string' }, place_on_board: { type: 'boolean' }, attach_to_item_id: { type: 'string' } }, ['code', 'url']) },
+  { name: 'attach_media', description: 'Прикрепить материал из библиотеки (по url или id) к улике, либо выложить его на доску отдельной карточкой (если item_id не указан).', inputSchema: S({ code, media: { type: 'string', description: 'url или id материала из list_library' }, item_id: { type: 'string' } }, ['code', 'media']) },
   { name: 'stamp_card', description: 'Поставить штамп на улику.', inputSchema: S({ code, item_id: { type: 'string' }, stamp: { type: 'string', enum: Object.keys(STAMPS) } }, ['code', 'item_id', 'stamp']) },
   { name: 'post_message', description: 'Написать в чат дела от имени «ИИ-напарник» (подсказки, версии, вопросы команде).', inputSchema: S({ code, text: { type: 'string' }, item_id: { type: 'string', description: 'сослаться на улику' } }, ['code', 'text']) },
   { name: 'assign_role', description: 'Назначить участнику роль в расследовании (видна у его аватара).', inputSchema: S({ code, member: { type: 'string', description: 'имя или id участника' }, role: { type: 'string', description: 'например: Ведущий детектив, Криминалист, Аналитик' } }, ['code', 'member', 'role']) },
@@ -137,6 +168,35 @@ async function call(name, a) {
     for (const r of [A, B]) if (!r.data.pin) out.push(row(b, 'item', { id: r.id, pin: { x: .5, y: .06 } }, r))
     out.push(row(b, 'thread', { id: uid(), layer: A.data.layer || 'main', a: A.id, b: B.id, kind, label: a.label || '', owner: 'ai', created: Date.now() }))
     out.push(hist(A.id, 'thread', { text: `${THREADS[kind]}: → «${B.data.title}»` }), hist(B.id, 'thread', { text: `${THREADS[kind]}: ← «${A.data.title}»` }))
+    await upsert(out)
+    return { ok: true }
+  }
+  if (name === 'list_library') {
+    const usedTitle = (id) => by(id)?.data?.title
+    return library(all).filter(m => !a.type || CATS[cat(m)] === a.type).map(m => ({ id: m.id, type: CATS[cat(m)], name: m.link?.title || m.name, url: m.url, size: m.size, on_cards: m.used.map(usedTitle).filter(Boolean) }))
+  }
+  const mediaCard = (m, near) => {
+    const type = CARD_FOR[m.kind] || 'folder', [w, h] = SIZE[type] || [260, 220], p = place(all, near), id = uid()
+    return [row(b, 'item', { id, type, x: Math.round(p.x), y: Math.round(p.y), w, h, rot: +(Math.random() * 4 - 2).toFixed(1), z: Date.now(), title: (m.link?.title || m.name || '').slice(0, 60), text: '', media: [m], pin: null, owner: 'ai', layer: 'main', created: Date.now() }), hist(id, 'create', { snap: { title: m.name } })]
+  }
+  const attachTo = (r, m) => [row(b, 'item', { id: r.id, media: [...(r.data.media || []).filter(x => x.url !== m.url), m] }, r), hist(r.id, 'attach', { text: m.link?.title || m.name })]
+  if (name === 'add_to_library') {
+    let url = String(a.url).trim(); if (!/^https?:\/\//i.test(url)) url = 'https://' + url
+    const kind = kindOf(url), id = uid()
+    const m = kind === 'link' ? { id, url, name: a.title || new URL(url).hostname, mime: 'text/uri-list', kind, link: { ...linkInfo(url), title: a.title } } : { id, url, name: a.title || decodeURIComponent(url.split(/[?#]/)[0].split('/').pop()), mime: '', kind, src: 'link' }
+    const out = [...extra, row(b, 'media', { ...m, by: 'ai', ts: Date.now() }, null)]
+    out[out.length - 1].id = 'lib_' + id
+    if (a.attach_to_item_id) { const r = by(a.attach_to_item_id); if (!r) throw new Error('Улика не найдена'); out.push(...attachTo(r, m)) }
+    else if (a.place_on_board) out.push(...mediaCard(m))
+    await upsert(out)
+    return { ok: true, media_id: id, type: CATS[cat(m)] }
+  }
+  if (name === 'attach_media') {
+    const m0 = library(all).find(m => m.url === a.media || m.id === a.media); if (!m0) throw new Error('Материал не найден в библиотеке')
+    const { used, by: _b, ts, ...m } = m0
+    const out = [...extra]
+    if (a.item_id) { const r = by(a.item_id); if (!r || r.kind !== 'item') throw new Error('Улика не найдена'); out.push(...attachTo(r, m)) }
+    else out.push(...mediaCard(m))
     await upsert(out)
     return { ok: true }
   }

@@ -300,7 +300,13 @@ export default function Canvas(p) {
     e.preventDefault()
     const w = toWorld(e)
     const tpl = e.dataTransfer.getData('application/x-detective')
-    if (tpl) { canEdit && actions.addFromTray(JSON.parse(tpl), w); return }
+    if (tpl) {
+      if (!canEdit) return
+      const t = JSON.parse(tpl)
+      const onCard = t.media && e.target.closest?.('[data-item]')?.dataset.item
+      if (onCard) actions.attachMedia(onCard, [t.media]); else actions.addFromTray(t, w)
+      return
+    }
     if (e.dataTransfer.files?.length && canEdit) actions.dropFiles([...e.dataTransfer.files], w)
   }
 
