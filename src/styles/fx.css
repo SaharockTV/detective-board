@@ -29,6 +29,9 @@
 /* ===== Штампы и скотч ===== */
 .mark { position: absolute; z-index: 6; transform: translate(-50%, -50%) rotate(var(--r)); pointer-events: none; }
 .canvas.tool-erase .mark { pointer-events: auto; }
+.canvas.tool-select .mark, .canvas.tool-stamp .mark, .canvas.tool-tape .mark { pointer-events: auto; cursor: grab; touch-action: none; }
+.canvas.tool-select .mark:active, .canvas.tool-stamp .mark:active, .canvas.tool-tape .mark:active, .canvas.tool-select .pin:active, .canvas.tool-pin .pin:active { cursor: grabbing; }
+.canvas.tool-select .pin, .canvas.tool-pin .pin { cursor: grab; touch-action: none; }
 .canvas.tool-erase .mark:hover { outline: 2px dashed #f0a6c0; }
 .stamp-m { color: var(--sc); border: 3px double var(--sc); padding: 4px 12px; font: 700 22px var(--type); letter-spacing: 3px; white-space: nowrap; mix-blend-mode: multiply; opacity: .85; border-radius: 3px;
   -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='40'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.55'/%3E%3C/filter%3E%3Crect width='120' height='40' filter='url(%23n)'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='40'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.55'/%3E%3C/filter%3E%3Crect width='120' height='40' filter='url(%23n)'/%3E%3C/svg%3E"); }

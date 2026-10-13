@@ -59,10 +59,14 @@ function Faces({ it }) {
       const a = ofKind(it, 'audio')
       return (
         <>
-          <div className="au-head"><span>АУДИОЗАПИСЬ</span><span>{fmtD(it.created)}</span></div>
-          <div className="au-title pen">{it.title}</div>
-          <div className="au-wave">{Array.from({ length: 48 }, (_, i) => <i key={i} style={{ height: 8 + Math.abs(Math.sin(i * 1.7) * Math.cos(i * .45)) * 34 + 'px' }} />)}</div>
-          <div className="au-file">{a ? '▶ ' + a.name : 'файл не прикреплён'}</div>
+          <div className="cassette-label">
+            <div className="au-head"><span>СТОРОНА A</span><span>60 MIN</span></div>
+            <div className="au-title pen">{it.title}</div>
+            <div className="cassette-window"><i className="cassette-reel" /><span className="cassette-tape" /><i className="cassette-reel" /></div>
+            <div className="au-file">{a ? a.name : 'файл не прикреплён'}</div>
+          </div>
+          <div className="cassette-base"><i /><span /><i /></div>
+          {[0, 1, 2, 3].map(n => <i key={n} className={'cassette-screw screw-' + n} />)}
         </>
       )
     }

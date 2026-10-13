@@ -120,13 +120,21 @@
 .fd-text { font-size: 19px; margin-top: 6px; white-space: pre-wrap; overflow: hidden; max-height: calc(100% - 70px); }
 .fd-files { position: absolute; right: 12px; bottom: 9px; font: 10px var(--type); color: #4a3c22; }
 
-/* ===== Аудиозапись (лист с осциллограммой) ===== */
-.c-audio { background-color: #f4f3ee; padding: 12px 14px; font-family: var(--type); }
-.au-head { display: flex; justify-content: space-between; font-size: 9.5px; letter-spacing: 1.5px; color: #555; border-bottom: 1px solid #999; padding-bottom: 4px; }
-.au-title { font-size: 22px; margin: 4px 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.au-wave { display: flex; align-items: center; gap: 2px; height: 46px; padding: 0 2px; border-top: 1px dashed #bbb; border-bottom: 1px dashed #bbb; }
-.au-wave i { flex: 1; background: #2a2d33; border-radius: 1px; min-width: 1px; }
-.au-file { font-size: 10px; color: #444; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ===== Аудиокассета — только внешний вид, вложение не меняется ===== */
+.c-audio { background: linear-gradient(145deg, #45484a, #232629 55%, #161819); border: 2px solid #111315; border-radius: 9px; padding: 10px 12px 27px; font-family: var(--type); box-shadow: inset 0 1px 2px #727779; }
+.cassette-label { position: relative; height: 100%; min-height: 0; border-radius: 5px; padding: 5px 8px; background: linear-gradient(#e4dfcb 0 40%, #bd6339 40% 46%, #e4dfcb 46%); border: 1px solid #898472; display: flex; flex-direction: column; }
+.au-head { display: flex; justify-content: space-between; font: 700 9px var(--type); letter-spacing: 1px; color: #484236; }
+.au-title { font-size: 20px; line-height: 1.1; margin: 3px 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
+.cassette-window { flex: 1; min-height: 22px; max-height: 48px; position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 12px; border: 2px solid #262826; border-radius: 22px; background: linear-gradient(#15191a, #474d4b); box-shadow: inset 0 2px 4px #000; overflow: hidden; }
+.cassette-reel { position: relative; z-index: 1; width: 30px; height: 30px; max-height: 100%; flex: none; border-radius: 50%; background: repeating-conic-gradient(#dedbc8 0deg 22deg, #4c514d 22deg 60deg); border: 4px solid #151717; box-shadow: 0 0 0 2px #8e9285; }
+.cassette-reel::after { content: ''; position: absolute; inset: 6px; border-radius: 50%; background: #252a28; }
+.cassette-tape { height: 16px; flex: 1; border-top: 2px solid #9c6b41; border-bottom: 2px solid #9c6b41; background: #232625; }
+.au-file { font-size: 10px; line-height: 1.3; color: #3d382f; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; }
+.cassette-base { position: absolute; bottom: 2px; left: 22%; right: 22%; height: 21px; background: linear-gradient(#3c4041, #25292b); border: 1px solid #111; clip-path: polygon(12% 0, 88% 0, 100% 100%, 0 100%); display: flex; justify-content: space-evenly; align-items: center; }
+.cassette-base i { width: 7px; height: 7px; border-radius: 50%; background: #0b0d0e; box-shadow: inset 0 1px 1px #666; }
+.cassette-base span { width: 28px; height: 7px; background: #111; border: 1px solid #555; }
+.cassette-screw { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: linear-gradient(45deg, #888 42%, #252525 42% 58%, #888 58%); box-shadow: 0 1px 1px #000; }
+.screw-0 { left: 4px; top: 4px; }.screw-1 { right: 4px; top: 4px; }.screw-2 { left: 4px; bottom: 4px; }.screw-3 { right: 4px; bottom: 4px; }
 
 /* ===== Кадр с камеры наблюдения ===== */
 .c-video { background-color: #f6f5f1; padding: 8px 8px 34px; }

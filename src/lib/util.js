@@ -84,10 +84,14 @@ export function throttle(fn, ms) {
 export const initials = (name = '?') => name.trim().split(/\s+/).map(s => s[0]).join('').slice(0, 2).toUpperCase() || '?'
 
 // Мир → точка булавки с учётом поворота карточки
-export function pinWorld(it) {
-  if (!it?.pin) return null
+export function itemPins(it) {
+  return [...(it?.pin ? [{ ...it.pin, id: 'legacy' }] : []), ...(it?.pins || [])]
+}
+export function pinWorld(it, pinId) {
+  const pin = pinId ? itemPins(it).find(p => p.id === pinId) : (it?.pin || it?.pins?.[0])
+  if (!pin) return null
   const cx = it.x + it.w / 2, cy = it.y + it.h / 2
-  const lx = it.pin.x * it.w - it.w / 2, ly = it.pin.y * it.h - it.h / 2
+  const lx = pin.x * it.w - it.w / 2, ly = pin.y * it.h - it.h / 2
   const r = (it.rot || 0) * Math.PI / 180
   return { x: cx + lx * Math.cos(r) - ly * Math.sin(r), y: cy + lx * Math.sin(r) + ly * Math.cos(r) }
 }

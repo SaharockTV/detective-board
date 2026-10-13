@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import Card from './Card'
 import { ChalkBoard } from '../components/Chalk'
 import Ghost, { DESTROY } from './Destroy'
-import { pinWorld, worldToLocal, clamp, THREADS, throttle, uid } from '../lib/util'
+import { pinWorld, itemPins, worldToLocal, clamp, THREADS, throttle, uid } from '../lib/util'
 
 export const PENS = {
   red: { name: 'Красный маркер', color: '#c1121f', width: 5 },
@@ -130,6 +130,7 @@ export default function Canvas(p) {
     setThreadPop(null)
     const w = toWorld(e)
     const pinEl = e.target.closest('[data-pin]')
+    const markEl = e.target.closest('[data-mark]')
     const handle = e.target.closest('[data-handle]')
     const itemEl = e.target.closest('[data-item]')
     const threadEl = e.target.closest('[data-thread]')
@@ -137,6 +138,15 @@ export default function Canvas(p) {
 
     if (e.button === 1 || tool === 'hand' || spaceDown) { g.current = { type: 'pan', sx: e.clientX, sy: e.clientY, v: viewRef.current }; return }
 
+    if (canEdit && ((pinEl && !pending && (sel || tool === 'pin')) || (markEl && (sel || tool === 'stamp' || tool === 'tape')))) {
+      const [id, mid] = markEl ? markEl.dataset.mark.split('|') : [pinEl.dataset.pin, pinEl.dataset.pinId]
+      const it = byId[id]
+      const point = markEl ? it?.marks?.find(m => m.id === mid) : itemPins(it).find(p => p.id === mid)
+      if (point) {
+        g.current = { type: markEl ? 'mark' : 'pinMove', id, mid, sw: w, it: { ...it }, start: worldToLocal(it, w), point, moved: false }
+        return
+      }
+    }
     if (tool === 'draw' && canEdit) {
       const P = PENS[pen] || PENS.red
       g.current = { type: 'draw', id: uid(), pen, color: P.color, width: P.width, alpha: P.alpha || 1, pts: [[Math.round(w.x), Math.round(w.y)]] }
@@ -158,11 +168,12 @@ export default function Canvas(p) {
       const id = pinEl?.dataset.pin || itemEl?.dataset.item
       if (id && byId[id]) {
         const it = byId[id]
-        if (!it.pin) actions.setPin(id, worldToLocal(it, w))
-        if (!pending) setPending({ from: id, to: w })
+        if (!itemPins(it).length) actions.setPin(id, worldToLocal(it, w))
+        const pid = pinEl?.dataset.pinId || itemPins(it)[0]?.id || 'legacy'
+        if (!pending) setPending({ from: id, fromPin: pid, to: w })
         else if (pending.from !== id) {
-          actions.addThread(pending.from, id, threadKind)
-          setPending(e.shiftKey ? { from: id, to: w } : null)
+          actions.addThread(pending.from, id, threadKind, pending.fromPin, pid)
+          setPending(e.shiftKey ? { from: id, fromPin: pid, to: w } : null)
         }
         g.current = null
         return
@@ -173,8 +184,8 @@ export default function Canvas(p) {
     if (pending && sel) {
       const id = pinEl?.dataset.pin || itemEl?.dataset.item
       if (id && byId[id] && id !== pending.from) {
-        if (!byId[id].pin) actions.setPin(id, worldToLocal(byId[id], w))
-        actions.addThread(pending.from, id, threadKind)
+        if (!itemPins(byId[id]).length) actions.setPin(id, worldToLocal(byId[id], w))
+        actions.addThread(pending.from, id, threadKind, pending.fromPin, pinEl?.dataset.pinId || itemPins(byId[id])[0]?.id || 'legacy')
       }
       setPending(null)
       return
@@ -188,7 +199,7 @@ export default function Canvas(p) {
 
     if (tool === 'pin' && itemEl && canEdit) {
       const id = itemEl.dataset.item
-      actions.setPin(id, worldToLocal(byId[id], w))
+      actions.addPin(id, worldToLocal(byId[id], w))
       return
     }
 
@@ -239,6 +250,18 @@ export default function Canvas(p) {
       return
     }
     if (s.type === 'erase') { eraseAt(e); return }
+    if (s.type === 'mark' || s.type === 'pinMove') {
+      if (Math.hypot(w.x - s.sw.x, w.y - s.sw.y) < 4 / viewRef.current.z && !s.moved) return
+      s.moved = true
+      const L = worldToLocal(s.it, w)
+      s.position = { x: +clamp(s.point.x + L.x - s.start.x, .03, .97).toFixed(4), y: +clamp(s.point.y + L.y - s.start.y, .03, .97).toFixed(4) }
+      const patch = s.type === 'mark'
+        ? { marks: (s.it.marks || []).map(m => m.id === s.mid ? { ...m, ...s.position } : m) }
+        : s.mid === 'legacy' ? { pin: { ...s.it.pin, ...s.position } } : { pins: (s.it.pins || []).map(p => p.id === s.mid ? { ...p, ...s.position } : p) }
+      setLocal(l => ({ ...l, [s.id]: patch }))
+      sendDrag({ id: s.id, ...patch })
+      return
+    }
     if (s.type === 'pan') {
       const dx = e.clientX - s.sx, dy = e.clientY - s.sy
       if (Math.abs(dx) + Math.abs(dy) > 3) s.click = false
@@ -275,6 +298,22 @@ export default function Canvas(p) {
     g.current = null
     if (!s) return
     setLifted(null)
+    if (e?.type === 'pointercancel') {
+      setDrawing(null)
+      if (s.id) {
+        setLocal(l => { const n = { ...l }; delete n[s.id]; return n })
+        if (s.type === 'mark' || s.type === 'pinMove') sendDrag({ id: s.id, pin: s.it.pin, pins: s.it.pins || [], marks: s.it.marks || [] })
+      }
+      return
+    }
+    if (s.type === 'mark' || s.type === 'pinMove') {
+      if (s.moved && s.position) {
+        if (s.type === 'mark') actions.moveMark(s.id, s.mid, s.position)
+        else actions.movePin(s.id, s.mid, s.position)
+      } else if (s.type === 'pinMove' && sel) setPending({ from: s.id, fromPin: s.mid, to: pinWorld(s.it, s.mid) })
+      setLocal(l => { const n = { ...l }; delete n[s.id]; return n })
+      return
+    }
     if (s.type === 'draw') {
       setDrawing(null)
       if (s.pts.length > 1) actions.addStroke({ id: s.id, pen: s.pen, color: s.color, width: s.width, alpha: s.alpha, pts: s.pts })
@@ -341,7 +380,7 @@ export default function Canvas(p) {
             <filter id="thr-sh" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.8" /></filter>
           </defs>
           {threads.map(t => {
-            const A = byId[t.a] && pinWorld(byId[t.a]), B = byId[t.b] && pinWorld(byId[t.b])
+            const A = byId[t.a] && pinWorld(byId[t.a], t.aPin), B = byId[t.b] && pinWorld(byId[t.b], t.bPin)
             if (!A || !B) return null
             const { d, mid } = threadPath(A, B)
             const col = THREADS[t.kind]?.color || '#c00'
@@ -365,11 +404,11 @@ export default function Canvas(p) {
           )}
         </svg>
 
-        {shown.filter(it => it.pin).map(it => {
-          const P = pinWorld(it)
+        {shown.flatMap(it => itemPins(it).map(pin => {
+          const P = pinWorld(it, pin.id)
           return (
-            <div key={it.id} className={'pin' + (isDim(it) ? ' dim' : '') + (pending?.from === it.id ? ' active' : '')} data-pin={it.id}
-              style={{ left: P.x, top: P.y, '--pc': members[it.owner]?.color || '#d62828' }} title="Булавка — кликните, чтобы протянуть нить">
+            <div key={it.id + ':' + pin.id} className={'pin' + (isDim(it) ? ' dim' : '') + (pending?.from === it.id && pending?.fromPin === pin.id ? ' active' : '')} data-pin={it.id} data-pin-id={pin.id}
+              style={{ left: P.x, top: P.y, '--pc': members[it.owner]?.color || '#d62828' }} title="Потяните, чтобы переместить. Клик — протянуть нить">
               <svg width="34" height="44" viewBox="0 0 34 44">
                 <ellipse cx="24" cy="38" rx="7" ry="2.6" fill="rgba(0,0,0,.32)" filter="url(#pinBlur)" />
                 <path d="M17 20 L21.5 37" stroke="url(#pinSteel)" strokeWidth="1.6" strokeLinecap="round" />
@@ -381,7 +420,7 @@ export default function Canvas(p) {
               </svg>
             </div>
           )
-        })}
+        }))}
         <svg width="0" height="0" style={{ position: 'absolute' }}><defs>
           <linearGradient id="pinShade" x1="0" x2="1"><stop offset="0" stopColor="#fff" stopOpacity=".25" /><stop offset=".45" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity=".45" /></linearGradient>
           <radialGradient id="pinTop" cx="38%" cy="35%" r="75%"><stop offset="0" stopColor="#fff" stopOpacity=".35" /><stop offset=".6" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity=".35" /></radialGradient>
@@ -392,7 +431,7 @@ export default function Canvas(p) {
     </>
   )
   const bgSize = 560 * v.z
-  const pendingFrom = pending && byId[pending.from] && pinWorld(byId[pending.from])
+  const pendingFrom = pending && byId[pending.from] && pinWorld(byId[pending.from], pending.fromPin)
   const tp = threadPop && threads.find(t => t.id === threadPop.id)
 
   return (
@@ -427,7 +466,7 @@ export default function Canvas(p) {
       {(tool === 'torch' || tool === 'uv') && <div className={'darkness ' + tool} style={{ '--px': (ptr ? ptr.x : -999) + 'px', '--py': (ptr ? ptr.y : -999) + 'px' }} />}
 
       {pending && <div className="hint-bar">Нить «{THREADS[threadKind].name}»: кликните по следующей булавке или материалу · Shift — цепочка · Esc — отмена</div>}
-      {!pending && tool === 'pin' && <div className="hint-bar">Булавка: кликните по материалу в месте, где его приколоть</div>}
+      {!pending && tool === 'pin' && <div className="hint-bar">Клик по материалу — новая булавка. Потяните за булавку, чтобы передвинуть её</div>}
       {!pending && tool === 'thread' && <div className="hint-bar">Нить: кликните по булавке, затем по следующей</div>}
       {tool === 'erase' && <div className="hint-bar">Ластик: проведите по пометке, штампу или скотчу</div>}
       {tool === 'tent' && <div className="hint-bar">Метка: кликните по доске, чтобы поставить нумерованную табличку</div>}
@@ -453,7 +492,7 @@ export default function Canvas(p) {
 
 function pick(d) {
   const o = {}
-  for (const k of ['x', 'y', 'w', 'h', 'rot']) if (d[k] !== undefined) o[k] = d[k]
+  for (const k of ['x', 'y', 'w', 'h', 'rot', 'pin', 'pins', 'marks']) if (d[k] !== undefined) o[k] = d[k]
   return o
 }
 

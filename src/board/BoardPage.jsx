@@ -109,14 +109,29 @@ export default function BoardPage({ code, me, setMe }) {
       B.put('item', { pin: { x: clamp(pin.x, 0.03, 0.97), y: clamp(pin.y, 0.03, 0.97) } }, id)
       if (!it?.pin) log(id, 'pin')
     },
+    addPin(id, pt) {
+      const it = findItem(id)
+      if (!it) return
+      const pin = { x: clamp(pt.x, .03, .97), y: clamp(pt.y, .03, .97) }
+      if (!it.pin) B.put('item', { pin }, id)
+      else B.put('item', { pins: [...(it.pins || []), { ...pin, id: uid() }] }, id)
+      log(id, 'pin')
+    },
+    movePin(id, pid, pt) {
+      const it = findItem(id)
+      if (!it) return
+      const pin = { x: clamp(pt.x, .03, .97), y: clamp(pt.y, .03, .97) }
+      if (pid === 'legacy') B.put('item', { pin: { ...it.pin, ...pin } }, id)
+      else B.put('item', { pins: (it.pins || []).map(p => p.id === pid ? { ...p, ...pin } : p) }, id)
+    },
     unpin(id) {
-      B.put('item', { pin: null }, id)
+      B.put('item', { pin: null, pins: [] }, id)
       B.threads.filter(t => t.a === id || t.b === id).forEach(t => B.put('thread', { deleted: true }, t.id))
       log(id, 'unpin')
     },
-    addThread(a, b, kind) {
-      if (B.threads.some(t => !t.deleted && ((t.a === a && t.b === b) || (t.a === b && t.b === a)))) { toast('Эти улики уже связаны'); return }
-      B.put('thread', { id: uid(), layer, a, b, kind, label: '', owner: me.id, created: Date.now() })
+    addThread(a, b, kind, aPin = 'legacy', bPin = 'legacy') {
+      if (B.threads.some(t => !t.deleted && ((t.a === a && t.b === b && (t.aPin || 'legacy') === aPin && (t.bPin || 'legacy') === bPin) || (t.a === b && t.b === a && (t.aPin || 'legacy') === bPin && (t.bPin || 'legacy') === aPin)))) { toast('Эти булавки уже связаны'); return }
+      B.put('thread', { id: uid(), layer, a, b, aPin, bPin, kind, label: '', owner: me.id, created: Date.now() })
       const ta = findItem(a)?.title, tb = findItem(b)?.title
       log(a, 'thread', { text: `${THREADS[kind].short}: → «${tb || 'без названия'}»` })
       log(b, 'thread', { text: `${THREADS[kind].short}: ← «${ta || 'без названия'}»` })
@@ -157,6 +172,11 @@ export default function BoardPage({ code, me, setMe }) {
       const it = findItem(id)
       if (!it) return
       B.put('item', { marks: (it.marks || []).filter(x => x.id !== mid) }, id)
+    },
+    moveMark(id, mid, pt) {
+      const it = findItem(id)
+      if (!it) return
+      B.put('item', { marks: (it.marks || []).map(m => m.id === mid ? { ...m, x: pt.x, y: pt.y } : m) }, id)
     },
     addTent(pt) {
       const num = 1 + Math.max(0, ...B.items.filter(i => i.type === 'tent' && (i.layer || 'main') === layer).map(i => i.num || 0))
